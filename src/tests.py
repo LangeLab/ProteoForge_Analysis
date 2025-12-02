@@ -1,21 +1,18 @@
 import os
-import feather
-from tqdm import tqdm
 from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd 
 
-import pingouin as pg
 from scipy import interpolate
 import scipy.special as special
-import statsmodels.formula.api as smf
 
 from src import utils
 
 # GLOBAL VARIABLES
 COLS = [
-    "N1", "N2", "log2FC", 
+    "N1", "N2", 
+    "log2FC", 'average',
     "df_p", "df_adjp", 
     "eq_lp", "eq_ladjp", 
     "eq_up", "eq_uadjp",
@@ -221,6 +218,7 @@ def run_unpaired(
 
     # Calculate fold-change (Assumes the data is log2 transformed)
     log2fc = m1 - m2
+    average = (m1 + m2) / 2
 
     # Find the index of proteins to be considered for equivalence
     is_test_eq = np.abs(log2fc) < eqThr
@@ -327,7 +325,7 @@ def run_unpaired(
     # Return the results as numpy ndarrays
     return np.stack(
         (
-            n1, n2, log2fc, 
+            n1, n2, log2fc, average, 
             ttest_pval, ttest_pval_corr,
             p_less, p_less_corr,
             p_greater, p_greater_corr,
@@ -387,6 +385,7 @@ def run_paired(
     d = (S1_arr - S2_arr).astype('d')
     # logfold change
     log2fc = np.nanmean(d, axis=1)
+    average = np.nanmean(np.stack((S1_arr, S2_arr), axis=1), axis=1)
     
     # Calculate the t-test p-values
     ttest_pval = ttest_rel_with_na(
@@ -481,7 +480,7 @@ def run_paired(
     # Return the results as numpy ndarrays
     return np.stack(
         (
-            n1, n2, log2fc, 
+            n1, n2, log2fc, average,
             ttest_pval, ttest_pval_corr,
             p_less, p_less_corr,
             p_greater, p_greater_corr,
@@ -653,6 +652,7 @@ def run_questvar(
         var_equal: bool=False,
         is_paired: bool=False,
         correction: str='fdr',
+        allow_missing: bool=False
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
        Run's QuEStVar's testing of a given pair from directly two np.ndarrays, applies the framework and 
@@ -687,8 +687,8 @@ def run_questvar(
     proteins = np.arange(S1_arr.shape[0])
 
     # Get the coefficient of variation for each protein
-    S1_arr_cv = utils.cv_numpy(S1_arr, axis=1, format='ratio')
-    S2_arr_cv = utils.cv_numpy(S2_arr, axis=1, format='ratio')
+    S1_arr_cv = utils.cv_numpy(S1_arr, axis=1, format='ratio', ignore_nan=allow_missing)
+    S2_arr_cv = utils.cv_numpy(S2_arr, axis=1, format='ratio', ignore_nan=allow_missing)
 
     # Make the protein selection indicator array
     S1_arr_ps = make_protein_selection_indicator(S1_arr_cv, cv_thr)
@@ -749,7 +749,7 @@ def run_questvar(
     # Create a info dataframe
     info_df = pd.DataFrame(
         {
-            "Protein": proteins,
+            "Entry": proteins,
             "S1_Status": S1_arr_ps,
             "S2_Status": S2_arr_ps, 
             "Status": status_all, 
@@ -1098,166 +1098,3 @@ def print_power_analysis_results(
         else:
             optimal_cvMean = results_df["cvMean"][results_df["calc_power"] >= power].max()
             print(f"  - The maximum mean intra-sample CV for target: {optimal_cvMean:.2f}")
-
-
-
-############################################ ProteoForge ############################################
-
-def _fit_model_and_get_pvalue(
-        data: pd.DataFrame,
-        formula: str,
-        model_type: str,
-        weight_col: str = None
-    ) -> float:
-    """
-        Fits a statistical model and returns the p-value for the interaction term.
-
-        Args:
-            data (pd.DataFrame): The data to fit the model to.
-            formula (str): The formula to use for the model.
-            cond_col (str): The name of the condition column.
-            model_type (str): The type of model to fit ['ols', 'mqr', 'rlm', 'glm', 'wls'].
-                - ols: Ordinary Least Squares
-                - mqr: Quantile Regression (Median)
-                - rlm: Robust Linear Model
-                - glm: Generalized Linear Model
-                - wls: Weighted Least Squares
-            weight_col (str): The name of the column to use as weights for WLS model.
-
-        Returns:
-            float: The p-value for the interaction term.
-    """
-    if model_type == "ols":
-        model = smf.ols(formula=formula, data=data).fit()
-    elif model_type == "mqr":
-        model = smf.quantreg(formula=formula, data=data, weights=data[weight_col]).fit(q=0.5)
-    elif model_type == "rlm":
-        model = smf.rlm(formula=formula, data=data, weights=data[weight_col]).fit()
-    elif model_type == "glm":
-        model = smf.glm(formula=formula, data=data, weights=data[weight_col]).fit()
-    elif model_type == "wls":
-        if weight_col is None:
-            raise ValueError("Weight column should be provided for WLS model.")
-        model = smf.wls(formula=formula, data=data, weights=data[weight_col]).fit()
-    else:
-        raise ValueError("Invalid model type. Must be one of ['ols', 'mqr', 'rlm', 'glm', 'wls']")
-    # Extract the interaction term and its p-value
-    return float(model.wald_test_terms().pvalues[-1])
-
-def _run_model_single_protein(
-        protein_data: pd.DataFrame,
-        formula: str,
-        peptide_col: str,
-        model_type: str,
-        weight_col: str = None
-    ) -> dict:
-    """
-        Runs the model for a single protein.
-
-        Args:
-            protein_data (pd.DataFrame): Data for a single protein.
-            formula (str): The formula to use for the model.
-            cond_col (str): The name of the condition column.
-            peptide_col (str): The name of the peptide column.
-            model_type (str): The type of model to fit ('ols', 'mqr').
-
-        Returns:
-            dict: A dictionary of p-values for each peptide in the protein.
-    """
-    # Get the unique peptides
-    unique_peptides = protein_data.index.unique()
-    pvalues = {} # Initialize the dictionary to store the p-values
-    for peptide in unique_peptides:
-        sub_data = protein_data.copy()
-        sub_data['allothers'] = 'allothers'
-        sub_data.loc[peptide, "allothers"] = peptide
-        pval = _fit_model_and_get_pvalue(sub_data, formula, model_type, weight_col)
-        pvalues[peptide] = pval
-    return pvalues
-
-def run_model(
-        long_data: pd.DataFrame,
-        cond_col: str = "day",
-        intensity_col: str = "ms1adj",
-        protein_col: str = "protein_id",
-        peptide_col: str = "peptide_id",
-        correction_type = "fdr_bh",
-        model_type: str = "wls",  # mqr, ols, rlm, glm, wls
-        weight_col: str = None
-    ) -> pd.DataFrame:
-    
-    """
-        Run a linear model on the data to test the interaction between the condition 
-            and the other peptides in protein. The model is fitted for each protein,  
-            peptide combination in the data.
-
-        Args:
-            long_data (pd.DataFrame): The input data in long format
-            cond_col (str): The column with the condition information
-            intensity_col (str): The column with the intensity information
-            protein_col (str): The column with the protein information
-            peptide_col (str): The column with the peptide information
-            correction_type (str): The multiple testing correction to use
-            model_type (str): The type of model to use (mqr, ols, rlm, glm, wls)
-                - mqr: Quantile Regression (Median)
-                - ols: Ordinary Least Squares
-                - rlm: Robust Linear Model
-                - glm: Generalized Linear Model
-                - wls: Weighted Least Squares
-            weight_col (str): The column to use as weights for WLS model
-            
-        Returns:
-            pd.DataFrame: The results of the model
-
-        Raises:
-            ValueError: If model_type is not one of mqr, ols, rlm
-    """
-
-    # Create a copy of the input data
-    input_data = long_data.copy()
-    unique_proteins = input_data[protein_col].unique()
-    # Set protein_id as index
-    input_data = input_data.set_index(protein_col)
-
-    # Specific formula for the model
-    formula = f'{intensity_col} ~ {cond_col} * allothers'
-
-    pdict = {}
-    # Iterate over each protein
-    for cur_prot in tqdm(unique_proteins, total=len(unique_proteins)):
-        # Get the data for the current protein
-        protein_data = input_data.loc[cur_prot].set_index(peptide_col).copy()
-        # Run the model for the protein
-        pvalues = _run_model_single_protein(
-            protein_data, 
-            formula,  
-            peptide_col, 
-            model_type, 
-            weight_col
-        )
-        # Store the results in the dictionary
-        for peptide, pval in pvalues.items():
-            pdict[(cur_prot, peptide)] = pval
-
-    # Expand the dictionary to a DataFrame
-    res_df = pd.DataFrame(
-        [(protein, peptide, pval) for (protein, peptide), pval in pdict.items()], 
-        columns=[protein_col, peptide_col, "pval"]
-    )
-    # Merge the results with the input data
-    res_df = pd.merge(
-        input_data.reset_index(), res_df, on=[protein_col, peptide_col], how="left"
-    )
-
-    # Create correct for peptide number then overall correction - adj. p-values
-    res_df["pval"] = res_df["pval"].astype(float).fillna(1)
-    res_df.groupby(protein_col)['pval'].transform(
-        # Corrected with unique n of peptides since it is done for each peptide against other
-        lambda x: x * (len(x.unique()))
-    )
-    res_df["pval"] = res_df["pval"].clip(upper=1)
-    res_df["adj_pval"] = multiple_testing_correction(
-        res_df["pval"], correction_type=correction_type
-    )
-    # Return the results
-    return res_df

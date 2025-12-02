@@ -7,8 +7,13 @@
 # Environments
 .env
 .venv
+.renv
 env/
 venv/
+renv/
+# renv lockfile
+renv.lock
+**/renv.lock
 
 # pyenv
 .python-version

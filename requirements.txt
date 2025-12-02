@@ -1,0 +1,37 @@
+# Core Data Science and Numerical Computing
+numpy>=2.3.0
+pandas>=2.3.0
+scipy>=1.15.3
+
+# Statistical Analysis and Modeling
+statsmodels>=0.14.4
+
+# Machine Learning
+scikit-learn>=1.7.0
+
+# Data Visualization
+matplotlib>=3.10.3
+seaborn>=0.13.2
+
+# Bioinformatics
+biopython>=1.85
+
+# Data I/O
+pyarrow>=20.0.0
+
+# Progress Bars
+tqdm>=4.67.1
+
+# Network Analysis and Clustering
+dynamicTreeCut>=0.1.1
+
+# Gene Set Enrichment Analysis
+gprofiler-official>=1.0.0
+
+# Development and Jupyter
+jupyter>=1.1.1
+ipykernel>=6.29.5
+
+# R Environment
+# See R_ENVIRONMENT.md for R package management
+# Run: source("setup_r_env.R") to initialize R environment

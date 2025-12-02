@@ -6,35 +6,29 @@ import seaborn as sns
 import matplotlib.colors as mcl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from matplotlib.lines import Line2D
+from matplotlib.figure import Figure
 import matplotlib.transforms as transforms
 import matplotlib.gridspec as gridspec
-from matplotlib.patches import Ellipse, Rectangle
-from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.patches import Ellipse, Patch
 
-import PyComplexHeatmap as pch # Complex Heatmaps in Python
+from matplotlib.colors import TwoSlopeNorm
 
-from typing import Union, Optional, Tuple, List
+from typing import Union, Optional, Tuple, List, Dict, Any
 
-from src import tests
+# ======================================================================================
+# Global Variables and Settings
+# ======================================================================================
+# TODO list: 
+# - Move the styling defaults to here
+# - Add the default color palettes for plots
+# - Include more plotting functions...
 
-#################### Global variables ####################
-# Colormap for the questvar package
-stat_colors = [
-    "#29335c", "#7e8cc6", "#565d61",
-    "#ff8020", "#eeeeee", "#70161e",
-    "#d06770"
-]
 
-# Define the status palette
-status_palette = {
-    "Excluded": "#565d61",
-    "Different": "#70161e",
-    "Unexplained": "#99999950",
-    "Equivalent": "#29335c",    
-}
 
-#################### Utility functions ####################
+# ======================================================================================
+# Utility Plotting Functions
+# ======================================================================================
+
 def hex_to_rgb(
         hex_code: str,
     ):
@@ -107,83 +101,84 @@ def pick_color_based_on_background(
 
     return darkColor if L > 0.179 else lightColor
 
-def save_figures(
-        fig_obj,
+def save_plot(
+        fig: Figure,
         filename: str,
         filepath: str = '',
-        fileformat: list[str] = ['png', 'svg', 'pdf'],
-        dpi: int = 300,
-        transparent: bool = True
+        formats: Optional[List[str]] = None,
+        verbose: bool = False,
+        **savefig_kwargs: Any,
     ):
     """
-        Saves the plot in multiple file formats in the specified path
+    Saves a Matplotlib figure, assuming the target directories already exist.
 
-        Args:
-            fig_obj (matplotlib.figure.Figure): Plot object
-            filename (str): Name of the file to be saved
-            filepath (str): Path to save the file
-            fileformat (list[str]): List of file formats to save the plot in
-            dpi (int): Dots per inch
-            transparent (bool): If the background should be transparent
+    This function uses the path structure 'filepath/format/filename.format'.
 
-        Returns:
-            None
+    Args:
+        fig (Figure): The Matplotlib figure object.
+        filename (str): The base name for the saved file (without an extension).
+        filepath (str): The root directory where the format subdirectories are located.
+        formats (Optional[List[str]]): A list of file formats.
+            Defaults to ['png', 'svg', 'pdf'].
+        **savefig_kwargs (Any): Additional keyword arguments passed to fig.savefig().
+            These will override the default settings below.
     """
-    for i in fileformat:
-        fig_obj.savefig(
-            filepath + "/" + i + "/" + filename + '.' + i,
-            format=i,
-            dpi=dpi, 
-            transparent=transparent,
-            bbox_inches='tight',
-            pad_inches=0.01
-        )
+    if formats is None:
+        formats = ['png', 'svg', 'pdf']
 
-################ Sequence Visualization functions ################
-# Source: alphamap/sequence_plot.py
-# Most of the main logic is the same but modified to work well with my project
+    # Default save options that can be overridden by the user via **savefig_kwargs
+    default_options: Dict[str, Any] = {
+        'dpi': 300,
+        'transparent': True,
+        'bbox_inches': 'tight',
+        'pad_inches': 0.01
+    }
+    # User's provided kwargs take precedence over the defaults
+    final_save_options = {**default_options, **savefig_kwargs}
 
-def format_uniprot_annotation(
-        uniprot_ann: pd.DataFrame, 
-        uniprot_feature_dict: dict, 
-        feature_col: str = 'feature',
-        note_col: str = 'note',
-        annotation_col: str = 'annotation'
-    ) -> pd.DataFrame:
+    for fmt in formats:
+        save_path = f"{filepath}/{fmt}/{filename}.{fmt}"
+        
+        fig.savefig(save_path, format=fmt, **final_save_options)
+        if verbose: print(f"Figure saved to: {save_path}")
+
+def finalize_plot(
+        fig: Figure,
+        show: bool = True,
+        save: bool = False,
+        filename: Optional[str] = None,
+        **kwargs: Any
+    ):
     """
-        Function to format uniprot annotation for plotting.
+    A wrapper to conveniently show, save, and/or close a Matplotlib figure.
 
-        Args:
-            uniprot_ann (pd.DataFrame): Formatted uniprot annotations from alphamap.
-            uniprot_feature_dict (dict): Uniprot feature dictionary defined by alphamap.
-            feature_col (str): Column name for uniprot feature. Default is 'feature'.
-            note_col (str): Column name for uniprot note. Default is 'note'.
-        Returns:
-            pd.DataFrame: Uniprot annotation with a combined structure entry for helix, strand and turn.
-
+    Args:
+        fig (Figure): The Matplotlib figure object to process.
+        show (bool): If True, display the figure interactively.
+        save (bool): If True, save the figure using the save_plot() function.
+        filename (Optional[str]): The base name for the file. Required if save=True.
+        **kwargs (Any): Other keyword arguments ('filepath', 'formats', 'dpi', etc.)
+                        are passed directly to the save_plot() function.
     """
-    
-    uniprot = uniprot_ann.copy(deep=True)
-    uniprot.loc[uniprot[feature_col] == "HELIX", note_col] = "Helix"
-    uniprot.loc[uniprot[feature_col] == "STRAND", note_col] = "Beta strand"
-    uniprot.loc[uniprot[feature_col] == "TURN", note_col] = "Turn"
-    uniprot.loc[uniprot[feature_col].isin(["HELIX","STRAND","TURN"]), feature_col] = "STRUCTURE"
+    if save:
+        if not filename:
+            raise ValueError("A 'filename' must be provided when 'save' is True.")
+        # Pass the figure, filename, and all other keyword arguments to save_plot
+        save_plot(fig=fig, filename=filename, **kwargs)
 
-    uniprot_feature_dict_rev = {v: k for k, v in uniprot_feature_dict.items()}
+    if show:
+        plt.show()
+    else:
+        # If not showing the plot, close it to free up memory.
+        plt.close(fig)
 
-    uniprot[annotation_col] = uniprot[note_col]
-    uniprot.loc[uniprot[annotation_col].isnull(), annotation_col] = uniprot[feature_col]
-    uniprot = uniprot.replace({annotation_col: uniprot_feature_dict_rev})
-    
-    return uniprot
-
-#################### Visualizations functions ####################
 
 # Plots a color palette with added functionality
 def color_palette(
         pal: Union[list, dict],
         size: int = 1, 
         name: str = "default colors",
+        show: bool = True,
         save: bool = False,
         filename: str = 'default_colors_pal',
         fileformats: list[str] = ['png', 'svg', 'pdf'],
@@ -199,6 +194,7 @@ def color_palette(
             pal (Union[list, dict]): List of colors or dictionary of colors with labels
             size (int): Size of the plot
             name (str): Name of the color palette
+            show (bool): If the plot should be shown
             save (bool): If the plot should be saved
             filename (str): Name of the file to be saved
             fileformats (list[str]): List of file formats to save the plot in
@@ -260,18 +256,14 @@ def color_palette(
     # Remove all axes
     ax.axis('off')
 
-    # Save the plot if needed
-    if save:
-        save_figures(
-            f,
-            filename,
-            filepath,
-            fileformats,
-            dpi,
-            transparent
-        )
-
-    plt.show()
+    finalize_plot( 
+        f, show, save, filename,
+        # Arguments
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
 
 def confidence_ellipse(
         x: np.ndarray,
@@ -331,219 +323,589 @@ def confidence_ellipse(
     ellipse.set_transform(transf + ax.transData)
     return ax.add_patch(ellipse)
 
-# QC Visualization functions
-def grouped_samples_density(
-        ## Data options
-        data: pd.DataFrame,
-        group_sample_dict: dict,
-        take_log2: bool = False,
-        ## Plot options
-        figsize: Tuple[int, int] = (8, 4),
-        color_dict: dict = None,
-        title: str = "Samples Distribution grouped by Condition",
-        legend_title: str = "Group",
-        # sample_size: int = 750, # Number of samples to take
-        gridsize: int = 50, # Number of points in the grid
-        ## Saving options
-        save: bool = False,
-        dont_show: bool = False,
-        filename: str = 'Initial_Grouped_Density',
-        filepath: str = '',
-        fileformats: list[str] = ['png', ],
-        dpi: int = 100,
-        transparent: bool = False
-    ):
+# ======================================================================================
+# Data Quality Check Visualizations
+# ======================================================================================
+
+def normalized_density_comparison(
+    before_df: pd.DataFrame,
+    after_df: pd.DataFrame,
+    condition_map: Dict[str, List[str]],
+    color_palette: Dict[str, str],
+    log_transform: bool = True,
+    title: str = "Distribution of Intensities Before and After Normalization",
+    figsize: Tuple[int, int] = (16, 4),
+    linewidth: float = 1.5,
+    alpha: float = 0.6,
+    xlabel: Optional[str] = None,
+    ylabel: str = "Density",
+    before_title: str = "Before Normalization",
+    after_title: str = "After Normalization",
+    legend_title: str = "Condition",
+    legend_loc: str = 'upper right',
+    legend_bbox: Tuple[float, float] = (0.98, 0.92),
+    legend_fontsize: int = 10,
+    legend_title_fontsize: int = 12,
+    grid: bool = True,
+    grid_style: str = '--',
+    grid_width: float = 0.75,
+    grid_alpha: float = 0.7,
+    despine: bool = True,
+    show: bool = True,
+    save: bool = False,
+    filename: str = 'normalized_density_comparison',
+    fileformats: List[str] = ['png', 'svg', 'pdf'],
+    filepath: str = '',
+    transparent: bool = True,
+    dpi: int = 300,
+):
     """
-    
+    Generates side-by-side KDE plots to compare data distributions before and after a transformation.
+
+    TODO: Docstring
     """
-    if take_log2:
-        plot_data = np.log2(data)
-
-    fig, ax = plt.subplots(figsize=figsize)
-    for i, (grp, cols) in enumerate(group_sample_dict.items()):
-        for _, col in enumerate(cols):
-            sns.kdeplot(
-                plot_data[col].dropna(),#.sample(sample_size),
-                ax=ax,
-                color=color_dict[grp],
-                gridsize=gridsize,
-                alpha=0.7,
-                rasterized=True,
-            )
-    ax.set_title(title, fontsize=14, loc="left", pad=10)
-    ax.set_xlabel("Log2 Intensity")
-    ax.set_ylabel("Density")
-
-    # Create Legend
-    legend_elements = [
-        Line2D([0], [0], color=clr, label=grp)
-        for grp, clr in color_dict.items()
-    ]
-
-    ax.legend(
-        handles=legend_elements,
-        title=legend_title,
-        loc="upper right",
-        fontsize=10,
-        title_fontsize=10,
-        frameon=False,
-    )
-
-    ax.grid(
-        axis="both",
-        which="major",
-        color="lightgrey",
-        linestyle="--",
-        linewidth=.5,
-        alpha=0.75,
-    )
-
-    sns.despine(left=True, bottom=True)
-    fig.tight_layout()
-
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-    if dont_show:
-        plt.close(fig)
-    else:
-        return fig
-
-
-def perturbation_lineplot(
-        data: pd.DataFrame,
-        protein_subset: list,
-        perturb_dict: dict,
-        column_order: list,
-        
-        ## Plot options
-        figsize: Tuple[int, int] = (12, 4),
-        color_dict: dict = {"Non-Perturbed": "#139593", "Perturbed": "#fca311"},
-        title: str = "Comparing Peptides Intensities Across Samples with -/+ Perturbation",
-        legend_title: str = "Perturbation",
-        
-        ## Saving options
-        save: bool = False,
-        dont_show: bool = False,
-        filename: str = 'PerturbationStatus_Lineplot',
-        filepath: str = '',
-        fileformats: list[str] = ['png', ],
-        dpi: int = 100,
-        transparent: bool = False
-    ):
-    """
-    """
-     
-    subset = data.loc[protein_subset].index.to_frame().set_index("Protein")
-    subset["Perturbation"] = "Non-Perturbed"
-
-    new_data = pd.DataFrame()
-    for k, v in perturb_dict.items():
-        if k in protein_subset:
-            protein_data = subset.loc[k]
-            protein_data.iloc[v["peptides"], 1] = "Perturbed"
-            new_data = pd.concat([new_data, protein_data])
-
-    if new_data.empty:
-       plot_data = data.loc[protein_subset].reset_index().melt(
-            id_vars=["Protein", "Mod.Peptide"],
-            var_name="Sample",
-            value_name="Intensity"
-        ).set_index("Protein").assign(
-            **{"log2(Intensity)": lambda x: np.log2(x["Intensity"] + 1)}
-        ).assign(Perturbation="Non-Perturbed")
-    else:
-        plot_data = pd.concat(
-            [
-                new_data.reset_index().set_index(["Protein", "Mod.Peptide"]),
-                data.loc[protein_subset]
-            ],
-            axis=1
-        ).reset_index().melt(
-            id_vars=["Protein", "Mod.Peptide", "Perturbation"],
-            var_name="Sample",
-            value_name="Intensity"
-        ).set_index("Protein").assign(
-            **{"log2(Intensity)": lambda x: np.log2(x["Intensity"] + 1)}
-        )
-    # Reorder the columns
-    plot_data['Sample'] = pd.Categorical(
-        plot_data['Sample'], 
-        categories=column_order, 
-        ordered=True
-    )
-
-    # Create the plot
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-    # Plot the data
-    sns.lineplot(
-        ax=ax,
-        data=plot_data,
-        x="Sample",
-        y="log2(Intensity)",
-        hue="Perturbation",
-        palette=color_dict,
-        alpha=0.7,
-        style="Perturbation",
-        dashes=False,
-        markers=["o", "X"],
-        ci=95,
-        err_style="bars",
-        err_kws={"capsize": 0},
-        legend="full",
-        markersize=10  # Increased marker size for better visibility
-    )
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
-    ax.set_title(title, fontsize=14, loc="left", pad=10)
-    ax.set_xlabel("Log2 Intensity")
-    ax.set_ylabel("Density")
-
-    ax.legend(
-        title=legend_title,
-        loc="upper right",
-        ncol=2, 
-        fontsize=10,
-        title_fontsize=10,
-        frameon=False,
-        bbox_to_anchor=(.95, 1.25)
-    )
-
-    ax.grid(
-        axis="both",
-        which="major",
-        color="lightgrey",
-        linestyle="--",
-        linewidth=.5,
-        alpha=0.75,
-    )
-
-    sns.despine(left=True, bottom=True)
-    fig.tight_layout()
-
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-        if dont_show:
-            plt.close(fig)
-    else:
-        if dont_show:
-            plt.close(fig)
+    def _plot_single_kde(ax, data_df, plot_title):
+        plot_data = np.log2(data_df) if log_transform else data_df
+        xlab = xlabel if xlabel is not None else ("log2(Intensity)" if log_transform else "Intensity")
+        for condition, columns in condition_map.items():
+            color = color_palette.get(condition, 'grey')
+            for col in columns:
+                if col in plot_data.columns:
+                    sns.kdeplot(
+                        plot_data[col].dropna(),
+                        ax=ax,
+                        color=color,
+                        linewidth=linewidth,
+                        alpha=alpha
+                    )
+        ax.set_title(plot_title, fontsize=14)
+        ax.set_xlabel(xlab, fontsize=12)
+        if grid:
+            ax.grid(axis='y', linestyle=grid_style, linewidth=grid_width, alpha=grid_alpha)
+        if despine:
+            sns.despine(ax=ax, top=True, right=True)
         else:
-            return fig
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize, sharex=True, sharey=True)
+    fig.suptitle(title, fontsize=18, y=0.98)
+
+    _plot_single_kde(axes[0], before_df, before_title)
+    axes[0].set_ylabel(ylabel, fontsize=12)
+    _plot_single_kde(axes[1], after_df, after_title)
+
+    legend_handles = [
+        Patch(facecolor=color, label=condition, alpha=0.8)
+        for condition, color in color_palette.items()
+        if condition in condition_map
+    ]
+    fig.legend(
+        handles=legend_handles,
+        title=legend_title,
+        title_fontsize=legend_title_fontsize,
+        fontsize=legend_fontsize,
+        frameon=False,
+        loc=legend_loc,
+        bbox_to_anchor=legend_bbox
+    )
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+    finalize_plot(
+        fig, show, save, filename,
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
+
+def downshift_effect(
+    df: pd.DataFrame,
+    cond_dict: Dict[str, List[str]],
+    is_log2: bool = False,
+    shift_magnitude: float = 1.8,
+    low_percentile: float = 0.10,
+    sample_size: int = 1000,
+    fill_alpha: float = 0.5,
+    orig_color: str = 'skyblue',
+    imputed_color: str = 'salmon',
+    orig_mean_color: str = 'blue',
+    imputed_mean_color: str = 'red',
+    mean_linestyle: str = '--',
+    xlabel: str = "Value",
+    ylabel: str = "Density",
+    title_prefix: str = "Condition: ",
+    suptitle: Optional[str] = None,
+    suptitle_fontsize: int = 16,
+    suptitle_y: float = 1.03,
+    legend_fontsize: int = 11,
+    legend_loc: str = 'best',
+    n_cols: Optional[int] = None,
+    figsize_per_col: int = 8,
+    figsize_per_row: int = 4,
+    tight_layout_rect: Tuple[float, float, float, float] = (0, 0, 1, 0.96),
+    show: bool = True,
+    save: bool = False,
+    filename: str = 'downshift_effect',
+    fileformats: List[str] = ['png', 'svg', 'pdf'],
+    filepath: str = '',
+    transparent: bool = True,
+    dpi: int = 300,
+):
+    """
+    Visualizes the effect of the downshift imputation parameters for each condition.
+
+    TODO: Docstring
+    """
+
+    def _find_downshift_params(
+        data: pd.DataFrame, shift_magnitude: float, low_percentile: float
+    ) -> Tuple[float, float]:
+        """Internal helper to find the downshifted mean and low-value threshold."""
+        quantified_values = data.values.flatten()
+        quantified_values = quantified_values[~np.isnan(quantified_values)]
+        if quantified_values.size == 0:
+            return 0, 0
+        low_value_threshold = np.percentile(quantified_values, low_percentile * 100)
+        low_value_distribution = quantified_values[quantified_values < low_value_threshold]
+        if low_value_distribution.size == 0:
+            downshifted_mean = low_value_threshold - shift_magnitude
+        else:
+            downshifted_mean = low_value_distribution.mean() - shift_magnitude
+        return downshifted_mean, low_value_threshold
+    
+    if not cond_dict:
+        print("Visualization skipped: A condition dictionary is required.")
+        return
+
+    if is_log2:
+        data = df.copy()
+    else:
+        data = np.log2(df).copy()
+
+    n_conditions = len(cond_dict)
+    if n_conditions == 0: return
+
+    if n_cols is None: n_cols = 2 if n_conditions > 1 else 1
+    n_rows = (n_conditions + n_cols - 1) // n_cols
+    figsize = (figsize_per_col * n_cols, figsize_per_row * n_rows)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    axes = axes.flatten()
+
+    if suptitle is None:
+        suptitle = f"Downshift Effect Analysis\n(shift_magnitude={shift_magnitude}, low_percentile={low_percentile})"
+    fig.suptitle(suptitle, fontsize=suptitle_fontsize, y=suptitle_y)
+
+    for i, (condition, samples) in enumerate(cond_dict.items()):
+        ax = axes[i]
+        valid_samples = [s for s in samples if s in data.columns]
+        if not valid_samples:
+            ax.text(0.5, 0.5, "No valid samples.", ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f"{title_prefix}{condition}", fontstyle='italic', fontsize=13)
+            ax.set_xticks([]); ax.set_yticks([])
+            continue
+
+        condition_data = data[valid_samples]
+        downshifted_mean, low_value_threshold = _find_downshift_params(condition_data, shift_magnitude, low_percentile)
+        quantified_values = condition_data.values.flatten()
+        quantified_values = quantified_values[~np.isnan(quantified_values)]
+        if quantified_values.size == 0:
+            ax.text(0.5, 0.5, "No quantified data.", ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f"{title_prefix}{condition}", fontstyle='italic', fontsize=13)
+            ax.set_xticks([]); ax.set_yticks([])
+            continue
+
+        low_value_dist = quantified_values[quantified_values < low_value_threshold]
+        if low_value_dist.size < 2:
+            ax.text(0.5, 0.5, "Not enough low values to plot.", ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f"{title_prefix}{condition}", fontstyle='italic', fontsize=13)
+            ax.set_xticks([]); ax.set_yticks([])
+            continue
+
+        imputed_dist_sample = np.random.normal(
+            loc=downshifted_mean,
+            scale=np.std(low_value_dist, ddof=1),
+            size=sample_size
+        )
+        imputed_dist_sample = np.clip(imputed_dist_sample, a_min=None, a_max=low_value_threshold)
+
+        bins = min(30, max(10, int(np.sqrt(low_value_dist.size))))
+        # Plot original low values histogram
+        ax.hist(
+            low_value_dist, bins=bins, color=orig_color, alpha=fill_alpha,
+            label=f'Original Low Values (n={len(low_value_dist)})', density=True, edgecolor='black', linewidth=1
+        )
+        # Plot imputed values histogram
+        ax.hist(
+            imputed_dist_sample, bins=bins, color=imputed_color, alpha=fill_alpha,
+            label=f'Imputed Values (Sample)', density=True, edgecolor='black', linewidth=1
+        )
+        # Mean lines
+        ax.axvline(np.mean(low_value_dist), color=orig_mean_color, linestyle=mean_linestyle,
+                   label=f'Mean (Original): {np.mean(low_value_dist):.2f}')
+        ax.axvline(downshifted_mean, color=imputed_mean_color, linestyle=mean_linestyle,
+                   label=f'Mean (Imputed): {downshifted_mean:.2f}')
+        ax.set_title(f"{title_prefix}{condition}", fontstyle='italic', fontsize=13)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.legend(fontsize=legend_fontsize, loc=legend_loc)
+        ax.grid(True, linestyle='--', alpha=0.5, color='lightgrey', linewidth=0.75)
+
+    for j in range(i + 1, len(axes)):
+        fig.delaxes(axes[j])
+
+    plt.tight_layout(rect=tight_layout_rect)
+
+    finalize_plot(
+        fig, show, save, filename,
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
+
+def imputation_distribution_per_condition(
+        original_data: pd.DataFrame,
+        imputed_data: pd.DataFrame,
+        cond_dict: Dict[str, List[str]],
+        is_log2: bool = False,
+        title: str = "Distribution of Original vs. Imputed Values Per Condition",
+        bins: str = 'auto',
+        orig_color: str = 'skyblue',
+        imputed_color: str = 'salmon',
+        orig_alpha: float = 0.6,
+        imputed_alpha: float = 0.6,
+        xlabel: str = "Value",
+        ylabel: str = "Count",
+        legend_fontsize: int = 11,
+        legend_loc: str = 'upper right',
+        grid: bool = True,
+        grid_style: str = '--',
+        grid_alpha: float = 0.5,
+        grid_color: str = 'lightgrey',
+        grid_width: float = 0.75,
+        suptitle_fontsize: int = 18,
+        suptitle_y: float = 0.98,
+        tight_layout_rect: tuple = (0, 0, 1, 0.96),
+        show: bool = True,
+        save: bool = False,
+        filename: str = 'imputation_distribution_per_condition',
+        fileformats: list = ['png', 'svg', 'pdf'],
+        filepath: str = '',
+        transparent: bool = True,
+        dpi: int = 300,
+    ):
+    """
+    Visualizes and compares the distributions of original and imputed values per condition.
+    """
+    n_conditions = len(cond_dict)
+    if n_conditions == 0:
+        print("No conditions to plot.")
+        return
+
+    # Apply log2 transform if needed
+    if not is_log2:
+        original_data = np.log2(original_data)
+        imputed_data = np.log2(imputed_data)
+
+    # Prepare subplot grid
+    n_cols = min(3, n_conditions)
+    n_rows = (n_conditions + n_cols - 1) // n_cols
+    figsize = (n_cols * 5, n_rows * 4)
+
+    # Compute global min/max for all data to ensure comparable bins and axes
+    all_values = []
+    for samples in cond_dict.values():
+        orig_vals = original_data[samples].values.flatten() if samples else np.array([])
+        imp_vals = imputed_data[samples].values.flatten() if samples else np.array([])
+        all_values.append(orig_vals)
+        all_values.append(imp_vals)
+    all_values = np.concatenate([v[~np.isnan(v)] for v in all_values if v.size > 0])
+    if all_values.size == 0:
+        print("No data to plot.")
+        return
+    global_min = np.nanmin(all_values)
+    global_max = np.nanmax(all_values)
+    if bins == 'auto':
+        bins_used = np.linspace(global_min, global_max, 31)
+    else:
+        bins_used = bins
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False, sharex=True, sharey=True)
+    axes = axes.flatten()
+
+    plotted_any = False
+    for i, (cond, samples) in enumerate(cond_dict.items()):
+        ax = axes[i]
+        if not samples:
+            ax.text(0.5, 0.5, "No samples", ha='center', va='center', fontsize=11, color='grey', transform=ax.transAxes)
+            ax.set_title(str(cond), fontsize=13, fontstyle='italic')
+            continue
+
+        orig_vals = original_data[samples].values.flatten()
+        imp_vals = imputed_data[samples].values.flatten()
+        # Imputed values: those that were missing in original but present in imputed
+        orig_flat = original_data[samples]
+        imp_flat = imputed_data[samples]
+        mask = orig_flat.isna() & imp_flat.notna()
+        imputed_only = imp_flat[mask].values.flatten()
+        orig_only = orig_vals[~np.isnan(orig_vals)]
+
+        if orig_only.size > 0:
+            ax.hist(
+                orig_only, color=orig_color, label='Original', alpha=orig_alpha,
+                bins=bins_used, edgecolor='black', linewidth=0.8
+            )
+        if imputed_only.size > 0:
+            ax.hist(
+                imputed_only, color=imputed_color, label='Imputed', alpha=imputed_alpha,
+                bins=bins_used, edgecolor='black', linewidth=0.8
+            )
+            plotted_any = True
+
+        ax.set_title(str(cond), fontsize=13, fontstyle='italic')
+        row_idx = i // n_cols
+        col_idx = i % n_cols
+        if col_idx == 0:
+            ax.set_ylabel(ylabel, fontsize=11)
+        else:
+            ax.set_ylabel("")
+        if row_idx == n_rows - 1:
+            ax.set_xlabel(xlabel, fontsize=11)
+        else:
+            ax.set_xlabel("")
+        if grid:
+            ax.grid(axis='both', linestyle=grid_style, alpha=grid_alpha, color=grid_color, linewidth=grid_width)
+        if (orig_only.size > 0 or imputed_only.size > 0):
+            ax.legend(fontsize=legend_fontsize, loc=legend_loc, frameon=False)
+        else:
+            ax.text(0.5, 0.5, "No data", ha='center', va='center', fontsize=11, color='grey', transform=ax.transAxes)
+        sns.despine(ax=ax)
+
+    # Remove unused axes
+    for j in range(n_conditions, len(axes)):
+        axes[j].set_visible(False)
+
+    fig.suptitle(title, fontsize=suptitle_fontsize, y=suptitle_y)
+    plt.tight_layout(rect=tight_layout_rect)
+
+    if not plotted_any:
+        print("Visualization skipped: No imputed values found in any condition.")
+        plt.close(fig)
+        return
+
+    finalize_plot(
+        fig, show, save, filename,
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
+
+def cv_comparison(
+    plot_data: pd.DataFrame,
+    cv_group_palettes: dict,
+    condition_colors: dict,
+    condition_order: Optional[List[str]] = None,
+    cv_col: str = "CV",
+    condition_col: str = "Condition",
+    cvgroup_col: str = "CVGroup",
+    figsize: Tuple[int, int] = (15, 4),
+    main_title: str = "Coefficient of Variation (CV) Comparison",
+    bar_width_ratios: List[int] = [1, 1],
+    bar_wspace: float = 0.05,
+    bar_title: str = "Count of proteins by CV Group",
+    box_title: str = "Distribution of CV in proteins",
+    bar_xlabel: str = "Count",
+    box_xlabel: str = "CV (%)",
+    bar_legend_ncol: int = 5,
+    bar_legend_loc: str = "upper center",
+    bar_legend_bbox: Tuple[float, float] = (0.5, 1.105),
+    box_legend_title: str = "Group Median",
+    box_legend_loc: str = "upper right",
+    box_legend_bbox: Tuple[float, float] = (1.05, 1.05),
+    box_legend_ncol: int = 1,
+    grid_style: str = "--",
+    grid_alpha: float = 0.5,
+    grid_color: str = "lightgrey",
+    grid_width: float = 0.75,
+    bar_title_fontsize: int = 12,
+    box_title_fontsize: int = 12,
+    show: bool = True,
+    save: bool = False,
+    filename: str = "cv_comparison",
+    fileformats: List[str] = ['png', 'svg', 'pdf'],
+    filepath: str = '',
+    transparent: bool = True,
+    dpi: int = 300,
+):
+    """
+    Creates a 2-panel CV comparison plot: 
+    1. Stacked horizontal barplot of CV groups per condition.
+    2. Boxplot (or violin) of CV distribution per condition, with group medians.
+
+    TODO: Docstring
+    """
+    # Order conditions if provided
+    if condition_order is not None:
+        plot_data = plot_data.copy()
+        plot_data[condition_col] = pd.Categorical(plot_data[condition_col], categories=condition_order, ordered=True)
+
+    # --- Prepare statistics table ---
+    # Calculate mean and median
+    stats_table = (
+        plot_data
+        .groupby(condition_col)
+        .agg(
+            Mean_CV=(cv_col, "mean"),
+            Median_CV=(cv_col, "median"),
+        )
+        .reset_index()
+    )
+    # Calculate counts for each CVGroup
+    cvgroup_counts = (
+        plot_data
+        .groupby([condition_col, cvgroup_col], observed=False)
+        .size()
+        .unstack(fill_value=0)
+        .add_prefix("Count_")
+        .reset_index()
+    )
+    # Merge the tables
+    stats_table = stats_table.merge(cvgroup_counts, on=condition_col, how="left")
+    # Format float columns
+    stats_table["Mean_CV"] = stats_table["Mean_CV"].round(2)
+    stats_table["Median_CV"] = stats_table["Median_CV"].round(2)
+
+    # --- Setup figure with 3 panels (bar, box, table) ---
+
+    fig = plt.figure(figsize=figsize)
+    gs = gridspec.GridSpec(
+        1, 3,
+        width_ratios=bar_width_ratios + [0.7],
+        wspace=bar_wspace
+    )
+    ax_bar = fig.add_subplot(gs[0, 0])
+    ax_box = fig.add_subplot(gs[0, 1], sharey=ax_bar)
+    ax_table = fig.add_subplot(gs[0, 2])
+    ax_table.axis("off")
+
+    # --- Panel 1: Stacked Barplot of CV Groups ---
+    cv_counts = plot_data.groupby([condition_col, cvgroup_col], observed=False).size().unstack(fill_value=0)
+    cv_counts = cv_counts.loc[condition_order] if condition_order is not None else cv_counts
+    cv_counts.plot(
+        ax=ax_bar,
+        kind="barh",
+        stacked=True,
+        color=[cv_group_palettes.get(g, "#cccccc") for g in cv_counts.columns],
+        edgecolor="black",
+        linewidth=0.5,
+        legend=False
+    )
+    ax_bar.set_xlabel(bar_xlabel)
+    ax_bar.set_ylabel("")
+    ax_bar.set_title(bar_title, pad=25, fontsize=bar_title_fontsize, fontstyle='italic')
+    ax_bar.grid("both", linestyle=grid_style, linewidth=grid_width, alpha=grid_alpha, color=grid_color)
+    # Custom legend for CV groups
+    handles = [
+        Patch(facecolor=cv_group_palettes.get(g, "#cccccc"), label=str(g))
+        for g in cv_counts.columns
+    ]
+    ax_bar.legend(
+        handles=handles, title="", frameon=False, bbox_to_anchor=bar_legend_bbox, 
+        ncol=bar_legend_ncol, loc=bar_legend_loc
+    )
+
+    # --- Panel 2: CV Distribution as Boxplot ---
+    sns.boxplot(
+        data=plot_data,
+        x=cv_col,
+        y=condition_col,
+        ax=ax_box,
+        color="lightgrey",
+        linewidth=0.75,
+        width=0.75,
+        fliersize=0.5,
+        order=condition_order
+    )
+    ax_box.set_xlabel(box_xlabel)
+    ax_box.set_ylabel("")
+    ax_box.set_title(box_title, pad=25, fontsize=box_title_fontsize, fontstyle='italic')
+    ax_box.grid("both", linestyle=grid_style, linewidth=grid_width, alpha=grid_alpha, color=grid_color)
+
+    # Add median lines for each condition
+    for cond in (condition_order if condition_order is not None else plot_data[condition_col].unique()):
+        median_val = plot_data.loc[plot_data[condition_col] == cond, cv_col].median()
+        ax_box.axvline(
+            median_val,
+            color=condition_colors.get(cond, "#333333"),
+            linestyle="--",
+            linewidth=1,
+            label=f"{cond}: {median_val:.2f}%"
+        )
+
+    # Only show one legend for medians, outside the plot
+    handles, labels = ax_box.get_legend_handles_labels()
+    ax_box.legend(
+        handles=handles, labels=labels, title=box_legend_title, frameon=False,
+        bbox_to_anchor=box_legend_bbox, loc=box_legend_loc, ncol=box_legend_ncol
+    )
+
+    # --- Panel 3: Table of statistics ---
+    # Prepare table data, transpose if more columns than rows
+    table_df = stats_table.copy()
+    transpose_table = table_df.shape[0] < table_df.shape[1]
+    if transpose_table:
+        table_df = table_df.set_index(condition_col).T
+        table_data = table_df.values.tolist()
+        row_labels = table_df.index.tolist()
+        col_labels = table_df.columns.tolist()
+        mpl_tbl = ax_table.table(
+            cellText=table_data,
+            rowLabels=row_labels,
+            colLabels=col_labels,
+            loc='center',
+            cellLoc='center'
+        )
+    else:
+        table_data = table_df.values.tolist()
+        col_labels = table_df.columns.tolist()
+        mpl_tbl = ax_table.table(
+            cellText=table_data,
+            colLabels=col_labels,
+            loc='center',
+            cellLoc='center'
+        )
+    mpl_tbl.auto_set_font_size(False)
+    mpl_tbl.set_fontsize(10)
+    mpl_tbl.scale(1.1, 1.3)
+    ax_table.set_title("CV Stats per Condition", fontsize=bar_title_fontsize, pad=15, fontstyle='italic')
+
+    # --- Auto-size columns based on label length ---
+    # Find the max character length for each column
+    if transpose_table:
+        labels = col_labels
+    else:
+        labels = col_labels
+    for i, label in enumerate(labels):
+        # Estimate width: 0.12 per character, min 0.8, max 2.0
+        width = min(max(0.12 * len(str(label)), 0.8), 2.0)
+        mpl_tbl.auto_set_column_width([i])
+        for key, cell in mpl_tbl.get_celld().items():
+            if key[1] == i:
+                cell.set_width(width)
+
+    sns.despine(left=True, bottom=True)
+    fig.suptitle(main_title, fontsize=16, fontweight='bold', y=1.15)
+
+    finalize_plot(
+        fig, show, save, filename,
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
+
 
 def combined_curves(
         data: pd.DataFrame,
@@ -563,7 +925,7 @@ def combined_curves(
 
         # Saving options
         save: bool = False,
-        dont_show: bool = False,
+        show: bool = True,
         filename: str = 'combined_curves_for_performance',
         filepath: str = '',
         fileformats: list[str] = ['png', ],
@@ -701,110 +1063,1078 @@ def combined_curves(
     plt.tight_layout()
     fig.suptitle(title, fontsize=16, fontweight="bold", y=1.05)
 
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-        if dont_show:
-            plt.close(fig)
-    else:
-        if dont_show:
-            plt.close(fig)
-        else:
-            return fig    
-
-def single_ROC_curve(
-        data: pd.DataFrame,
-        
-        # Figure settings
-        figsize: Tuple[int, int] = (6, 6),
-
-        title: str = "ROC Curve",
-
-        # Styling options
-        curve_line_color: str = 'black',
-        curve_line_width: float = 1.5,
-        curve_line_alpha: float = 1,
-        marker_size: int = 15,
-
-        # Saving options
-        save: bool = False,
-        dont_show: bool = False,
-        filename: str = 'single_ROC_curve',
-        filepath: str = '',
-        fileformats: list[str] = ['png', ],
-        dpi: int = 100,
-        transparent: bool = False
-    ):
-    """
-    
-    """
-
-    # Check if the column names are correct
-    if not {"FPR", "TPR"}.issubset(data.columns):
-        raise ValueError("The data does not contain the required columns 'FPR' and 'TPR'")
-    
-    # Calculate the AUC
-    auc = np.trapz(data["TPR"], data["FPR"])
-
-    # Initialize the figure
-    fig, ax = plt.subplots(figsize=figsize)
-    
-    # Plot the ROC curve
-    sns.lineplot(
-        data=data,
-        x="FPR",
-        y="TPR",
-        ax=ax,
-        color=curve_line_color,
-        linewidth=curve_line_width,
-        alpha=curve_line_alpha,
-        markers=True,
-        dashes=False,
-        marker="o",
-        markersize=marker_size, 
-        markerfacecolor="white",
-        markeredgewidth=curve_line_width,
-        markeredgecolor=curve_line_color,
+    finalize_plot( 
+        fig, show, save, filename,
+        # Arguments
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
     )
 
-    # Add the diagonal line
-    ax.plot([0, 1], [0, 1], color="black", linestyle="--")
 
-    # Set the labels
-    ax.set_xlabel("False Positive Rate (FPR)", fontsize=12)
-    ax.set_ylabel("True Positive Rate (TPR)", fontsize=12)
-    ax.set_title(title, fontsize=14, fontweight="bold", pad=10)
-    ax.grid("both", linestyle="--", linewidth=0.5, alpha=0.5, color="lightgrey")
-    ax.text(0.95, 0.05, f"AUC: {auc:.2f}", ha="right", fontsize=15, fontweight="bold", color=curve_line_color, transform=ax.transAxes)
-    ax.set_xlim(-0.05, 1.05)
-    ax.set_ylim(-0.05, 1.05)
-    sns.despine(fig, top=True, right=True, left=True, bottom=True)
-    plt.tight_layout()
+# ======================================================================================
+# QuEStVar Visualizations
+# ======================================================================================
 
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
+def single_variable_power_profile(
+        plot_data: pd.DataFrame,            # Input DataFrame with power analysis results
+        x_axis_variable: str,               # The variable to plot on the x-axis ("eqThr", "cvMean", or "nRep")
+        y_axis_variable: str,               # The variable to plot on the y-axis ("calc_power")
+        target_power: float,                # Desired statistical power for the test
+        # Figure parameters
+        figsize: tuple = (6, 4),            # Dimensions (width, height) of the figure in inches
+        line_color: str = "#003566",        # Color of the line plot
+        target_line_color: str = "#fca311", # Color of the line indicating the target power
+        figtitle: str = None,               # Title of the plot
+        xlabel: str = None,                 # Label for the x-axis
+        # Finalize plot parameters
+        show: bool = True,
+        save: bool = False,
+        filename: str = "powerProfile_line",
+        fileformats: List[str] = ['png', 'svg', 'pdf'],
+        filepath: str = '',
+        transparent: bool = True,
+        dpi: int = 300,
+    ):
+    """
+        Plots the power analysis profile for a single variable against the achieved power.
+
+        This function generates a line plot illustrating how the statistical power
+        varies with changes in a single experimental parameter (equivalence threshold,
+        mean coefficient of variation, or number of replicates). The plot includes a
+        horizontal line indicating the target power, error bars representing standard
+        deviation, and an annotation detailing the simulation parameters.
+
+    """
+
+    # Validate the input for x-axis variable
+    if x_axis_variable not in ["eqThr", "cvMean", "nRep"]:
+        raise ValueError("Invalid x_axis_variable. Choose from 'eqThr', 'cvMean', or 'nRep'.")
+
+    cvMean = plot_data["cvMean"].unique()[0]
+    nRep = plot_data["nRep"].unique()[0]
+    pThr = plot_data["pThr"].unique()[0]
+    corr = plot_data["corr"].unique()[0]
+    eqThr = plot_data["eqThr"].unique()[0]
+    nRepeats = plot_data["iteration"].max() + 1
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Plot the mean power values
+    sns.lineplot(
+        x=x_axis_variable,   
+        y=y_axis_variable, 
+        data=plot_data,      
+        ax=ax,              
+        color=line_color,    
+        linewidth=2.5,
+        marker="o",
+        markersize=8,
+        markerfacecolor="white",
+        markeredgewidth=1.5,
+        markeredgecolor=line_color,
+        n_boot=1000,       
+        errorbar=("sd"),  
+    )
+
+    # Adjust the y-axis limits
+    ax.set_ylim(-0.05, 1.05) 
+
+    # Set the title dynamically based on the x-axis variable
+    if figtitle is None:
+        figtitle = f"Power Analysis: Effect of {x_axis_variable.replace('_', ' ').capitalize()}"
+    ax.set_title(
+        figtitle, 
+        fontsize=12, 
+        fontweight="bold", 
+        loc="left",
+        pad=20
+    )
+
+    # Set the x-axis label dynamically based on the x-axis variable
+    if xlabel is None:
+        xlabel = x_axis_variable.replace("_", " ").capitalize()
+    ax.set_xlabel(
+        xlabel, 
+        fontsize=10, 
+        fontweight="bold", 
+        labelpad=10
+    )
+
+    # Set the y-axis label
+    ax.set_ylabel(
+        "Power (Difference from Adjusted SEI)", 
+        fontsize=10, 
+        fontweight="bold",
+        labelpad=10
+    )
+
+    # Add text annotation with parameters, excluding the x-axis variable
+    annotation_text = f"Target Power: {target_power} | Parameters: "
+    if x_axis_variable != "eqThr":
+        annotation_text += f"eqThr = {eqThr}, "
+    if x_axis_variable != "meanCV":
+        annotation_text += f"CV% = {cvMean:.2f}, "
+    if x_axis_variable != "nRep":
+        annotation_text += f"n = {nRep}, "
+    annotation_text += f"pThr = {pThr}, Cor = {corr}, repeat = {nRepeats}"
+
+    ax.text(
+        x=0.0,
+        y=1.025,
+        s=annotation_text,
+        fontsize=8,
+        fontstyle="italic",
+        ha="left",
+        va="bottom",
+        transform=ax.transAxes
+    )
+
+    # Add a horizontal line to indicate the target power
+    ax.axhline(
+        y=target_power,  
+        color=target_line_color, 
+        linestyle="--",
+        linewidth=1.5,
+        label="Target Power"
+    )
+
+    # Add gridlines for better readability
+    ax.grid(
+        axis="both", 
+        color="lightgray", 
+        alpha=0.5, 
+        linestyle="--", 
+        linewidth=0.5
+    )
+
+    # Remove top and right spines for a cleaner look
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()  # Adjust layout for better visual appeal
+
+    finalize_plot(
+        fig, show, save, filename,
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
+
+def questvar_test_summary(
+    quest_data, 
+    p_thr=0.05, 
+    eq_thr=0.5, 
+    df_thr=0.75, 
+    cv_thr=1.5,
+    correction="fdr",
+    # cond_1 / cond_2 for log2fc and test
+    cond_1: str = 'Condition 1', 
+    cond_2: str = 'Condition 2',
+    # Figure parameters
+    figsize=(20, 15),
+    title_add: str = '',
+    rasterize_scatters=True,
+    status_colors=None,
+    show_excluded=True,
+    legend_fontsize=11,
+    title_fontsize=18,
+    
+    # Finalize plot parameters
+    show: bool = True,
+    save: bool = False,
+    filename: str = "questvar_test_summary",
+    fileformats: List[str] = ['png', 'svg', 'pdf'],
+    filepath: str = '',
+    transparent: bool = True,
+    dpi: int = 300,
+):
+    """
+        Creates a comprehensive summary plot for QuestVar test results.
+
+        TODO: Docstring
+    """
+
+    # Default colors if not provided
+    if status_colors is None:
+        status_colors = {
+            'Unexplained': "#C2C0C0",    
+            'Excluded': '#565d61',       
+            'Upregulated': '#780000',    
+            'Downregulated': '#e36414',  
+            'Equivalent': '#003049',     
+        }
+    
+    # Main title styling
+    main_title_styles = {
+        'fontsize': title_fontsize,
+        'fontweight': 'bold',
+        'color': 'black',
+        'y': 0.96
+    }
+    
+    # Subplot title styling
+    subplot_title_styles = {
+        'fontsize': title_fontsize - 4,
+        # 'fontweight': 'bold',
+        'fontstyle': 'italic',
+        'color': 'black',
+        'pad': 5
+    }
+    
+    # Axis label styling
+    axis_label_styles = {
+        'fontsize': title_fontsize - 5,
+        # 'fontweight': 'bold',
+        'color': 'black',
+        'labelpad': 5
+    }
+    
+    # Tick label styling
+    tick_label_styles = { 'labelsize': title_fontsize - 7, 'pad': 2 }
+    
+    # Legend styling
+    legend_styles = {
+        'fontsize': legend_fontsize - 1,
+        'frameon': True,
+        'fancybox': True,
+        'shadow': True,
+        'framealpha': 0.95,
+        'handlelength': 2.0,
+        'handletextpad': 0.4,
+        'columnspacing': 0.4,
+        'labelspacing': 0.3,
+        'borderpad': 0.6
+    }
+    
+    # Grid styling
+    grid_styles = {
+        'alpha': 0.3,
+        'linestyle': '--',
+        'linewidth': 0.5,
+        'color': 'lightgray'
+    }
+    
+    # Annotation box styling
+    annotation_box_styles = {
+        'boxstyle': "round,pad=0.4",
+        'facecolor': 'lightblue',
+        'alpha': 0.7,
+        'edgecolor': 'navy',
+        'linewidth': 0.5
+    }
+    
+    # Subplot letter styling
+    subplot_letter_styles = {
+        'fontsize': title_fontsize,
+        'fontweight': 'bold',
+        'color': 'black',
+        'bbox': dict(boxstyle="round,pad=0.3", facecolor='white', edgecolor='black', linewidth=1),
+        'transform': None,  # Will be set per subplot
+        'ha': 'center',
+        'va': 'center'
+    }
+    
+    # Helper function to add subplot letters
+    def add_subplot_letter(ax, letter, styles=subplot_letter_styles):
+        """Add a letter annotation to subplot"""
+        styles_copy = styles.copy()
+        styles_copy['transform'] = ax.transAxes
+        ax.text(0.02, 1.0, letter, **styles_copy)
+    
+    # Filter data if excluding certain categories
+    plot_data = quest_data.copy()
+    if not show_excluded:
+        plot_data = plot_data[plot_data['Status'] != 'Excluded']
+
+    # Create figure with optimized settings
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(
+        4, 5,  hspace=0.4, wspace=0.5, 
+        height_ratios=[0.65, 0.65, 0.65, 0.65], 
+        width_ratios=[0.75, 1.0, 1.0, 1.0, 1.0], 
+        left=0.07, right=0.94, top=0.89, bottom=0.14
+    )
+
+    # =============================================================================
+    # COLUMN 1: P-value Distributions
+    # =============================================================================
+    
+    # T-test p-values
+    ax1 = fig.add_subplot(gs[0, 0])
+    add_subplot_letter(ax1, 'A')
+    
+    valid_df_p = plot_data['df_p'].dropna()
+    valid_df_adjp = plot_data['df_adjp'].dropna()
+    
+    if len(valid_df_p) > 0:
+        ax1.hist(valid_df_p, bins=30, alpha=0.6, color='#F8AD9D',
+                label='Raw p-values', density=True, edgecolor='black', linewidth=0.5)
+    if len(valid_df_adjp) > 0:
+        ax1.hist(valid_df_adjp, bins=30, alpha=0.8, color='#bc4749',
+                label=f'Adjusted ({correction})', density=True, edgecolor='black', linewidth=0.5)
+    
+    ax1.axvline(x=p_thr, color='black', linestyle='--', linewidth=1.5, 
+               label=f'Threshold ({p_thr})', alpha=0.8)
+    ax1.set_ylabel('Difference Testing\nP-value Density', **axis_label_styles)
+    ax1.legend(**legend_styles)
+    ax1.grid(True, **grid_styles)
+    ax1.set_title('T-test P-values', **subplot_title_styles)
+    ax1.tick_params(**tick_label_styles)
+    
+    # TOST p-values
+    ax2 = fig.add_subplot(gs[1, 0])
+    add_subplot_letter(ax2, 'B')
+    
+    valid_eq_p = plot_data['eq_p'].dropna()
+    valid_eq_adjp = plot_data['eq_adjp'].dropna()
+    
+    if len(valid_eq_p) > 0:
+        ax2.hist(valid_eq_p, bins=30, alpha=0.6, color='#A8DADC',
+                label='Raw p-values', density=True, edgecolor='black', linewidth=0.5)
+    if len(valid_eq_adjp) > 0:
+        ax2.hist(valid_eq_adjp, bins=30, alpha=0.8, color='#457B9D',
+                label=f'Adjusted ({correction})', density=True, edgecolor='black', linewidth=0.5)
+    
+    ax2.axvline(x=p_thr, color='black', linestyle='--', linewidth=1.5, 
+               label=f'Threshold ({p_thr})', alpha=0.8)
+    ax2.set_xlabel('P-value', **axis_label_styles)
+    ax2.set_ylabel('Equivalence Testing\nP-value Density', **axis_label_styles)
+    ax2.legend(**legend_styles)
+    ax2.grid(True, **grid_styles)
+    ax2.set_title('TOST P-values', **subplot_title_styles)
+    ax2.tick_params(**tick_label_styles)
+    
+    # Combined p-value comparison
+    ax3 = fig.add_subplot(gs[2, 0])
+    add_subplot_letter(ax3, 'C')
+    
+    valid_mask = plot_data[['df_adjp', 'eq_adjp']].notna().all(axis=1)
+    valid_data = plot_data[valid_mask]
+    
+    if len(valid_data) > 0:
+        scatter_colors = [status_colors[status] for status in valid_data['Status']]
+        scatter = ax3.scatter(
+            valid_data['df_adjp'], valid_data['eq_adjp'], 
+            c=scatter_colors, s=25, alpha=0.7,
+            edgecolor='white', linewidth=0.3, 
+            rasterized=rasterize_scatters
         )
-        if dont_show:
-            plt.close(fig)
+    
+    ax3.axhline(y=p_thr, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+    ax3.axvline(x=p_thr, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+    ax3.set_xlabel('Difference Test\nAdjusted P-value', **axis_label_styles)
+    ax3.set_ylabel('Equivalence Test\nAdjusted P-value', **axis_label_styles)
+    ax3.set_xscale('log')
+    ax3.set_yscale('log')
+    ax3.grid(True, **grid_styles)
+    ax3.set_title('Comparison', **subplot_title_styles)
+    ax3.tick_params(**tick_label_styles)
+
+    # =============================================================================
+    # COLUMN 2-3: Antler's Plot (Modified Volcano)
+    # =============================================================================
+    
+    ax4 = fig.add_subplot(gs[0:2, 1:3])
+    add_subplot_letter(ax4, 'D')
+    
+    # Plot data by status with controlled order for proper layering
+    plot_order = ['Excluded', 'Unexplained', 'Downregulated', 'Upregulated', 'Equivalent']
+    
+    for status in plot_order:
+        if status in plot_data['Status'].unique():
+            if not show_excluded and status == 'Excluded':
+                continue
+            subset = plot_data[plot_data['Status'] == status]
+            if len(subset) > 0:
+                ax4.scatter(
+                    subset['log2FC'], subset['log10(adj_pval)'],
+                    c=status_colors[status], label=status, s=40,
+                    edgecolor='white', linewidth=0.3, alpha=0.8,
+                    rasterized=rasterize_scatters, zorder=5
+                )
+    
+    # Optimize plot limits for Antler's (Volcano) plot
+    x_data = plot_data['log2FC'].dropna()
+    y_data = plot_data['log10(adj_pval)'].dropna()
+
+    if len(x_data) > 0 and len(y_data) > 0:
+        # X-axis: symmetric around zero with offset
+        x_abs_max = np.max(np.abs(x_data))
+        x_offset = x_abs_max * 0.07 if x_abs_max > 0 else 1.0
+        ax4.set_xlim(-(x_abs_max + x_offset), x_abs_max + x_offset)
+
+        # Y-axis: use min/max with offset
+        y_min, y_max = y_data.min(), y_data.max()
+        y_offset = (y_max - y_min) * 0.07 if (y_max - y_min) > 0 else 1.0
+        ax4.set_ylim(y_min - y_offset, y_max + y_offset)
+    
+    # Add threshold lines with proper z-ordering
+    ax4.axhline(y=0, color='lightgray', linestyle='-', linewidth=1, alpha=0.6, zorder=1)
+    ax4.axvline(x=0, color='lightgray', linestyle='-', linewidth=1, alpha=0.6, zorder=1)
+    
+    # Equivalence thresholds (blue dashed)
+    ax4.axhline(y=np.log10(p_thr), color='#457B9D', linestyle='--', linewidth=2, 
+               alpha=0.8, zorder=2)
+    ax4.axvline(x=eq_thr, color='#457B9D', linestyle='--', linewidth=2, 
+               alpha=0.8, zorder=2)
+    ax4.axvline(x=-eq_thr, color='#457B9D', linestyle='--', linewidth=2, 
+               alpha=0.8, zorder=2)
+    
+    # Difference thresholds (red dotted)
+    ax4.axhline(y=-np.log10(p_thr), color='#bc4749', linestyle=':', linewidth=2, 
+               alpha=0.8, zorder=2)
+    ax4.axvline(x=df_thr, color='#bc4749', linestyle=':', linewidth=2, 
+               alpha=0.8, zorder=2)
+    ax4.axvline(x=-df_thr, color='#bc4749', linestyle=':', linewidth=2, 
+               alpha=0.8, zorder=2)
+    
+    ax4.set_xlabel(f'log2 Fold Change ({cond_1} vs {cond_2})', **axis_label_styles)
+    ax4.set_ylabel('log10 Adj. p-val (equiv.) | -log10 Adj. p-val (diff.)', **axis_label_styles)
+    ax4.set_title("Antler's Plot: Equivalence + Difference Testing", **subplot_title_styles)
+    ax4.grid(True, **grid_styles)
+    ax4.tick_params(**tick_label_styles)
+
+    # =============================================================================
+    # COLUMN 4-5: MA Plot  
+    # =============================================================================
+    
+    ax5 = fig.add_subplot(gs[0:2, 3:5])
+    add_subplot_letter(ax5, 'E')
+    
+    # Plot with same order as Antler's plot
+    for status in plot_order:
+        if status in plot_data['Status'].unique():
+            if not show_excluded and status == 'Excluded':
+                continue
+            subset = plot_data[plot_data['Status'] == status]
+            if len(subset) > 0:
+                ax5.scatter(
+                    subset['average'], subset['log2FC'],
+                    c=status_colors[status], label=status, s=40,
+                    edgecolor='white', linewidth=0.3, alpha=0.8,
+                    rasterized=rasterize_scatters, zorder=5
+                )
+    
+    # Optimize MA plot limits with symmetric y-axis and proportional x-axis offset
+    avg_data = plot_data['average'].dropna()
+    fc_data = plot_data['log2FC'].dropna()
+    
+    if len(avg_data) > 0 and len(fc_data) > 0:
+        # X-axis: add proportional offset for visibility
+        x_min, x_max = avg_data.min(), avg_data.max()
+        offset = (x_max - x_min) * 0.07 if (x_max - x_min) > 0 else 1.0
+        ax5.set_xlim(x_min - offset, x_max + offset)
+        
+        # Y-axis: symmetric around zero with offset
+        y_abs_max = np.max(np.abs(fc_data))
+        y_offset = y_abs_max * 0.07 if y_abs_max > 0 else 1.0
+        ax5.set_ylim(-(y_abs_max + y_offset), y_abs_max + y_offset)
+    
+    # Add threshold lines
+    ax5.axhline(y=0, color='lightgray', linestyle='-', linewidth=1, alpha=0.6, zorder=1)
+    ax5.axhline(y=df_thr, color='#bc4749', linestyle=':', linewidth=2, alpha=0.8, zorder=2)
+    ax5.axhline(y=-df_thr, color='#bc4749', linestyle=':', linewidth=2, alpha=0.8, zorder=2)
+    ax5.axhline(y=eq_thr, color='#457B9D', linestyle='--', linewidth=2, alpha=0.8, zorder=2)
+    ax5.axhline(y=-eq_thr, color='#457B9D', linestyle='--', linewidth=2, alpha=0.8, zorder=2)
+    
+    ax5.set_xlabel(f'Average Expression ({cond_1} & {cond_2})', **axis_label_styles)
+    ax5.set_ylabel(f'log2 Fold Change ({cond_1} vs {cond_2})', **axis_label_styles)
+    ax5.set_title("MA Plot: Mean Expression vs Fold Change", **subplot_title_styles)
+    ax5.grid(True, **grid_styles)
+    ax5.tick_params(**tick_label_styles)
+
+    # =============================================================================
+    # BOTTOM ROW: Horizontal Status Counts, Exclusion Matrix, and Sample Size
+    # =============================================================================
+    
+    # Horizontal Status counts 
+    ax6 = fig.add_subplot(gs[2, 1])
+    add_subplot_letter(ax6, 'F')
+    
+    status_order = ['Downregulated', 'Unexplained', 'Equivalent', 'Upregulated']
+    if show_excluded:
+        status_order.append('Excluded')
+    
+    status_counts = plot_data['Status'].value_counts().reindex(status_order, fill_value=0)
+    colors_status = [status_colors[status] for status in status_order]
+    
+    # Create horizontal bars with better spacing
+    y_positions = np.arange(len(status_order))
+    bars = ax6.barh(
+        y_positions, status_counts.values, 
+        color=colors_status, alpha=0.9,
+        edgecolor='black', linewidth=0.8,
+        height=0.6  # Even thinner bars for more spacing
+    )
+    
+    # Improve y-axis labels and spacing
+    ax6.set_yticks(y_positions)
+    ax6.set_yticklabels(status_order)
+    ax6.tick_params(axis='y', labelsize=tick_label_styles.get('labelsize', 10), pad=tick_label_styles.get('pad', 3))
+    # ax6.set_ylabel('Testing Result Categories', **axis_label_styles)
+    ax6.set_xlabel('Count', **axis_label_styles)
+    
+    # Add value labels with better positioning
+    max_count = max(status_counts.values) if len(status_counts.values) > 0 else 1
+    for i, count in enumerate(status_counts.values):
+        if count > 0:
+            ax6.text(
+                count + max_count * 0.02, i, f'{count:,}', 
+                va='center', ha='left',
+            )
+    
+    ax6.set_xlim(right=max_count * 1.25)
+    ax6.grid(axis='x', **grid_styles)
+    ax6.set_title('Category Counts', **subplot_title_styles)
+    ax6.tick_params(**tick_label_styles)
+    ax6.invert_yaxis()  # Put first category at top
+    
+    # Exclusion Matrix
+    ax_matrix = fig.add_subplot(gs[2, 2])
+    add_subplot_letter(ax_matrix, 'G')
+    
+    # Create exclusion matrix data
+    if 'S1_Status' in plot_data.columns and 'S2_Status' in plot_data.columns:
+        # Convert status to categorical codes
+        def status_to_code(status_series):
+            return status_series.map({
+                -1: 'Filtered',    # CV > cv_thr
+                0: 'Missing',      # NaN
+                1: 'Retained'      # CV <= cv_thr
+            }).fillna('Missing')
+        
+        s1_cat = status_to_code(plot_data['S1_Status'])
+        s2_cat = status_to_code(plot_data['S2_Status'])
+        
+        # Create crosstab
+        matrix_data = pd.crosstab(s1_cat, s2_cat, margins=False)
+        
+        # Ensure all categories are present
+        categories = ['Retained', 'Missing', 'Filtered']
+        matrix_data = matrix_data.reindex(index=categories, columns=categories, fill_value=0)
+        
+        im = ax_matrix.imshow(matrix_data.values, cmap='Grays', aspect='auto', alpha=0.8)
+        
+        # Add text annotations with dynamic color based on background
+        max_val = matrix_data.values.max()
+        for i in range(len(categories)):
+            for j in range(len(categories)):
+                value = matrix_data.iloc[i, j]
+                # Use white text for darker backgrounds, black for lighter
+                text_color = "white" if value > max_val * 0.4 else "black"
+                text = ax_matrix.text(j, i, f'{value:,}',
+                                    ha="center", va="center", 
+                                    color=text_color,
+                                    fontweight='bold', fontsize=tick_label_styles['labelsize'])
+        
+        # Set labels and title with improved spacing
+        ax_matrix.set_xticks(range(len(categories)))
+        ax_matrix.set_yticks(range(len(categories)))
+        ax_matrix.set_xticklabels(categories)
+        ax_matrix.set_yticklabels(categories)
+        ax_matrix.tick_params(axis='x', labelsize=tick_label_styles.get('labelsize', 10), pad=tick_label_styles.get('pad', 3))
+        ax_matrix.tick_params(axis='y', labelsize=tick_label_styles.get('labelsize', 10), pad=tick_label_styles.get('pad', 3))
+        ax_matrix.set_xlabel(f'{cond_2} Status', **axis_label_styles)
+        ax_matrix.set_ylabel(f'{cond_1} Status', **axis_label_styles)
+        ax_matrix.set_title('Exclusion Matrix', **subplot_title_styles)
+        
+        # Improve tick parameters and remove spines for cleaner look
+        ax_matrix.tick_params(**tick_label_styles)
+        for spine in ax_matrix.spines.values():
+            spine.set_visible(False)
+        
     else:
-        if dont_show:
-            plt.close(fig)
+        ax_matrix.text(0.5, 0.5, 'S1_Status and S2_Status\ncolumns not found', 
+                      ha='center', va='center', transform=ax_matrix.transAxes,
+                      fontsize=axis_label_styles['fontsize'], 
+                      bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray'))
+        ax_matrix.set_title('Exclusion Matrix', **subplot_title_styles)
+        ax_matrix.axis('off')
+    
+    # Sample size comparison
+    ax7 = fig.add_subplot(gs[2, 3])
+    add_subplot_letter(ax7, 'H')
+    
+    n1_data = plot_data['N1'].dropna()
+    n2_data = plot_data['N2'].dropna()
+
+    if len(n1_data) > 0 and len(n2_data) > 0:
+        max_bins = min(20, len(np.unique(n1_data)), len(np.unique(n2_data)))
+        if max_bins >= 2:
+            hb = ax7.hexbin(
+                n1_data, n2_data,
+                gridsize=max_bins, cmap='Grays', mincnt=1, 
+                linewidths=0.3, alpha=0.85,
+                rasterized=True  # Always rasterize hexbin for performance
+            )
+            # Add a minimal colorbar
+            cb = fig.colorbar(hb, ax=ax7, shrink=0.7, pad=0.04)
+            cb.set_label('Count', fontsize=tick_label_styles['labelsize'])
+            cb.ax.tick_params(labelsize=tick_label_styles['labelsize'])
+            nmax1, nmax2 = int(n1_data.max()), int(n2_data.max())
+            ax7.set_xlim(0, nmax1 + 1)
+            ax7.set_ylim(0, nmax2 + 1)
         else:
-            return fig
+            # All proteins have the same sample size; show this info
+            unique_n1 = n1_data.unique()
+            unique_n2 = n2_data.unique()
+            if len(unique_n1) == 1 and len(unique_n2) == 1:
+                ax7.text(
+                    0.5, 0.5,
+                    f"All proteins have the same sample size:\n"
+                    f"N1 = {unique_n1[0]}, N2 = {unique_n2[0]}\n"
+                    f"(n = {len(n1_data)})",
+                    ha='center', va='center', transform=ax7.transAxes,
+                    fontsize=axis_label_styles['fontsize'],
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray')
+                )
+            else:
+                ax7.text(
+                    0.5, 0.5,
+                    'Not enough unique sample sizes\nto plot hexbin',
+                    ha='center', va='center', transform=ax7.transAxes,
+                    fontsize=axis_label_styles['fontsize'],
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray')
+                )
+    
+    ax7.set_xlabel(f'N1 ({cond_1} Samples)', **axis_label_styles)
+    ax7.set_ylabel(f'N2 ({cond_2} Samples)', **axis_label_styles)
+    ax7.set_title('Sample Size\nComparison', **subplot_title_styles)
+    ax7.grid(True, **grid_styles)
+    ax7.tick_params(**tick_label_styles)
+
+    # =============================================================================
+    # COMPREHENSIVE LEGEND AND ANNOTATIONS
+    # =============================================================================
+    
+    ax8 = fig.add_subplot(gs[2, 4:5])
+    
+    # Create legend sections
+    legend_elements = []
+    
+    # Section 1: Status categories
+    legend_elements.append(plt.Line2D([0], [0], color='none', label='Status Categories:'))
+    for status in status_order:
+        if status in plot_data['Status'].unique():
+            legend_elements.append(
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor=status_colors[status], 
+                          markersize=7, label=f'  {status}',
+                          markeredgecolor='white', markeredgewidth=0.5)
+            )
+    
+    # Section 2: Threshold lines
+    legend_elements.append(plt.Line2D([0], [0], color='none', label=''))  # Spacer
+    legend_elements.append(plt.Line2D([0], [0], color='none', label='Equivalence Thresholds:'))
+    legend_elements.extend([
+        plt.Line2D([0], [0], color='#457B9D', linestyle='--', linewidth=2.2, 
+                  label=f'  p-value = {p_thr}'),
+        plt.Line2D([0], [0], color='#457B9D', linestyle='--', linewidth=2.2, 
+                  label=f'  |log2FC| = ±{eq_thr}')
+    ])
+    
+    legend_elements.append(plt.Line2D([0], [0], color='none', label=''))  # Spacer
+    legend_elements.append(plt.Line2D([0], [0], color='none', label='Difference Thresholds:'))
+    legend_elements.extend([
+        plt.Line2D([0], [0], color='#bc4749', linestyle=':', linewidth=2.2, 
+                  label=f'  p-value = {p_thr}'),
+        plt.Line2D([0], [0], color='#bc4749', linestyle=':', linewidth=2.2, 
+                  label=f'  |log2FC| = ±{df_thr}')
+    ])
+    
+    # Create the legend with optimized layout
+    legend = ax8.legend(
+        handles=legend_elements,
+        loc='upper left',
+        fontsize=legend_fontsize - 1,  # Slightly smaller for better fit
+        frameon=True,
+        fancybox=True,
+        shadow=True,
+        framealpha=0.95,
+        title=r'$\mathbf{Legend}$',
+        title_fontsize=legend_fontsize,
+        handlelength=2.0,
+        handletextpad=0.4,
+        columnspacing=0.4,
+        labelspacing=0.3,
+        borderpad=0.6
+    )
+    legend.get_title().set_position((0, 0))
+
+    ax8.axis('off')
+    
+    # Add comprehensive methodology and figure description in the last row (split into two columns)
+    methodology_ax_left = fig.add_subplot(gs[3, :3])   # Left half of last row
+    methodology_ax_right = fig.add_subplot(gs[3, 3:])  # Right half of last row
+    methodology_ax_left.axis('off')
+    methodology_ax_right.axis('off')
+
+    # Left: Statistical methodology
+    # Compute maximum sample sizes for each condition
+    N1 = int(plot_data['N1'].max()) if 'N1' in plot_data.columns else 0
+    N2 = int(plot_data['N2'].max()) if 'N2' in plot_data.columns else 0
+
+    methodology_text_left = (
+        r"$\mathbf{STATISTICAL\ TESTING\ METHODOLOGY}$" + "\n\n"
+        rf"• $\mathbf{{Equivalence\ Testing}}$: Two One-Sided Tests (TOST) with $|log_2FC| < {eq_thr:.3f}$ as equivalence threshold" +"\n"
+        rf"• $\mathbf{{Difference\ Testing}}$: Welch's t-test with $|log_2FC| > {df_thr:.3f}$ as significance threshold" + "\n"
+        rf"• $\mathbf{{CV\ Filtering}}$: Features with CV $> {cv_thr:.2f}$ excluded from analysis" + "\n"
+        rf"• $\mathbf{{Multiple\ Testing}}$: {correction} correction applied" + "\n"
+        rf"• $\mathbf{{Significance\ Level}}$: $\alpha = {p_thr:.3f}$" + "\n"
+        "\n"
+        rf"$\mathbf{{Data\ Summary}}$: {len(plot_data):,} features analyzed" + "\n"
+        rf"{cond_1}: {N1} samples • {cond_2}: {N2} samples"
+    )
+
+    # Right: Figure panel description
+    methodology_text_right = (
+        r"$\mathbf{FIGURE\ PANEL\ DESCRIPTION}$" + "\n\n"
+        rf"$\mathbf{{A)}}$ T-test P-values: Distribution of p-values from Welch's t-tests comparing {cond_1} vs {cond_2}" + "\n"
+        r"$\mathbf{B)}$ TOST P-values: Distribution of p-values from Two One-Sided Tests for equivalence assessment" + "\n"
+        r"$\mathbf{C)}$ P-value Comparison: Scatter plot comparing t-test vs TOST p-values with significance thresholds" + "\n"
+        r"$\mathbf{D)}$ Antler's Plot: Effect size (LogFC) vs statistical significance with TOST categories color-coded" + "\n"
+        r"$\mathbf{E)}$ MA Plot: Mean expression vs log fold change with significance and equivalence regions highlighted" + "\n"
+        r"$\mathbf{F)}$ Category Distribution: Bar chart showing counts of features in each TOST category" + "\n"
+        r"$\mathbf{G)}$ Exclusion Matrix: Cross-tabulation of sample filtering status between conditions" + "\n"
+        r"$\mathbf{H)}$ Sample Size Comparison: Hexagonal binning of sample sizes between conditions"
+    )
+
+    methodology_ax_left.text(
+        0.02, 0.98, methodology_text_left,
+        transform=methodology_ax_left.transAxes,
+        fontsize=10,
+        verticalalignment='top',
+        horizontalalignment='left',
+        bbox=dict(
+            boxstyle="round,pad=0.5",
+            facecolor='#f8f9fa',
+            alpha=0.9,
+            edgecolor='#343a40',
+            linewidth=1
+        )
+    )
+
+    methodology_ax_right.text(
+        -0.1, 0.98, methodology_text_right,
+        transform=methodology_ax_right.transAxes,
+        fontsize=10,
+        verticalalignment='top',
+        horizontalalignment='left',
+        bbox=dict(
+            boxstyle="round,pad=0.5",
+            facecolor='#f8f9fa',
+            alpha=0.9,
+            edgecolor='#343a40',
+            linewidth=1
+        ),
+    )
+    
+    # Add main title with better positioning
+    fig.suptitle(
+        f"QuEStVar's Testing Summary for Equivalence and Difference Testing\n{title_add}",
+        **main_title_styles
+    )
+
+    # Finalize the plot
+    finalize_plot(
+        fig, show, save, filename,
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
+
+def antlers_with_annotations(
+        quest_data,
+        p_thr=0.05,
+        eq_thr=0.5,
+        df_thr=0.75,
+        protein_ids: List[str] = None,    
+        status_colors: Dict[str, str] = None,
+
+        # Plot parameters
+        figsize: Tuple[float, float] = (12, 9),
+        id_col: str = 'Protein',
+        annot_col: str = 'Gene',
+        title_add: str = '',
+        cond_1: str = 'Condition 1',
+        cond_2: str = 'Condition 2',
+        
+        # Annotation parameters
+        annotation_fontsize: int = 9,
+        annotation_fontweight: str = 'bold',
+        annotation_alpha: float = 0.5,
+        annotation_edge_width: float = 1.5,
+        arrow_width: float = 1.5,
+        arrow_alpha: float = 0.8,
+        
+        # adjust_text parameters
+        expand_points: Tuple[float, float] = (1.5, 1.5),
+        expand_text: Tuple[float, float] = (1.3, 1.3),
+        expand_objects: Tuple[float, float] = (1.1, 1.1),
+        arrowprops_adjust: dict = None,
+        force_points: float = 0.3,
+        force_text: float = 0.8,
+        force_objects: float = 0.5,
+        
+        rasterize_scatters=True,
+
+        # Finalize plot parameters
+        show: bool = True,
+        save: bool = False,
+        filename: str = "antlers_annotated",
+        fileformats: List[str] = ['png', 'svg', 'pdf'],
+        filepath: str = '',
+        transparent: bool = True,
+        dpi: int = 300,
+    ):
+    """
+        Create an enhanced Antler's plot with high-quality annotations and 
+        automatic label positioning.
+    
+        TODO: docstring
+    """
+    
+    # Default colors optimized for contrast
+    if status_colors is None:
+        status_colors = {
+            'Unexplained': "#C2C0C0",    
+            'Excluded': '#565d61',       
+            'Upregulated': '#780000',    
+            'Downregulated': '#e36414',  
+            'Equivalent': '#003049',     
+        }
+    
+    # Default arrow properties for adjust_text
+    if arrowprops_adjust is None:
+        arrowprops_adjust = dict(
+            arrowstyle='->', 
+            color='black', 
+            lw=arrow_width, 
+            alpha=arrow_alpha,
+            shrinkA=3, 
+            shrinkB=3
+        )
+    
+    # Helper function to determine optimal text color based on background
+    def get_optimal_text_color(bg_color):
+        """
+        Determine optimal text color (black or white) based on background color luminance.
+        Uses relative luminance calculation for accessibility.
+        """
+        # Convert color to RGB if it's a hex string
+        if isinstance(bg_color, str) and bg_color.startswith('#'):
+            # Remove # and convert to RGB
+            bg_color = bg_color.lstrip('#')
+            r, g, b = tuple(int(bg_color[i:i+2], 16) for i in (0, 2, 4))
+        else:
+            # Assume it's already RGB or a named color - convert via matplotlib
+            rgb = mcl.to_rgb(bg_color)
+            r, g, b = [int(255 * x) for x in rgb]
+        
+        # Calculate relative luminance (ITU-R BT.709)
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        
+        # Return white text for dark backgrounds, black for light backgrounds
+        return 'white' if luminance < 0.5 else 'black'
+    
+    # Enhanced color palette for annotation boxes (better contrast)
+    def get_annotation_colors(status):
+        """Get optimized background and text colors for annotations based on status."""
+        color_schemes = {
+            'Unexplained': {'bg': '#F5F5F5', 'edge': '#C2C0C0'},      # Light gray bg
+            'Upregulated': {'bg': '#FFEBEE', 'edge': '#780000'},      # Light red bg
+            'Downregulated': {'bg': '#FFF3E0', 'edge': '#e36414'},    # Light orange bg
+            'Equivalent': {'bg': '#E3F2FD', 'edge': '#003049'},       # Light blue bg
+        }
+        
+        scheme = color_schemes.get(status, {'bg': '#FFFFFF', 'edge': '#000000'})
+        text_color = get_optimal_text_color(scheme['bg'])
+        
+        return scheme['bg'], scheme['edge'], text_color
+
+    # Plot order for proper layering
+    plot_order = ['Unexplained', 'Downregulated', 'Upregulated', 'Equivalent']
+
+    # Data validation
+    plot_data = quest_data.copy()
+    if 'Status' not in plot_data.columns:
+        raise ValueError("The input data must contain a 'Status' column.")
+
+    if 'log2FC' not in plot_data.columns or 'log10(adj_pval)' not in plot_data.columns:
+        raise ValueError("The input data must contain 'log2FC' and 'log10(adj_pval)' columns.")
+
+    # Create figure with enhanced styling
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot data points by status with controlled layering
+    for status in plot_order:
+        if status in plot_data['Status'].unique():
+            subset = plot_data[plot_data['Status'] == status]
+            if len(subset) > 0:
+                ax.scatter(
+                    subset['log2FC'], subset['log10(adj_pval)'],
+                    c=status_colors[status], label=status, s=45,
+                    edgecolor='white', linewidth=0.4, alpha=0.85,
+                    rasterized=rasterize_scatters, zorder=5
+                )
+    
+    # Optimize plot limits for better visualization
+    x_data = plot_data['log2FC'].dropna()
+    y_data = plot_data['log10(adj_pval)'].dropna()
+
+    if len(x_data) > 0 and len(y_data) > 0:
+        # X-axis: symmetric around zero with padding
+        x_abs_max = np.max(np.abs(x_data))
+        x_padding = x_abs_max * 0.15  # More padding for annotations
+        ax.set_xlim(-(x_abs_max + x_padding), x_abs_max + x_padding)
+
+        # Y-axis: with padding for annotations
+        y_min, y_max = y_data.min(), y_data.max()
+        y_padding = (y_max - y_min) * 0.15
+        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+    
+    # Add enhanced threshold lines
+    ax.axhline(y=0, color='lightgray', linestyle='-', linewidth=1.2, alpha=0.7, zorder=1)
+    ax.axvline(x=0, color='lightgray', linestyle='-', linewidth=1.2, alpha=0.7, zorder=1)
+    
+    # Equivalence thresholds (blue dashed) with labels
+    eq_color = '#1976D2'
+    ax.axhline(y=np.log10(p_thr), color=eq_color, linestyle='--', linewidth=2.5, 
+               alpha=0.9, zorder=2, label=f'Equivalence: p={p_thr}')
+    ax.axvline(x=eq_thr, color=eq_color, linestyle='--', linewidth=2.5, 
+               alpha=0.9, zorder=2)
+    ax.axvline(x=-eq_thr, color=eq_color, linestyle='--', linewidth=2.5, 
+               alpha=0.9, zorder=2)
+    
+    # Difference thresholds (red dotted) with labels
+    diff_color = '#D32F2F'
+    ax.axhline(y=-np.log10(p_thr), color=diff_color, linestyle=':', linewidth=2.5, 
+               alpha=0.9, zorder=2, label=f'Difference: p={p_thr}')
+    ax.axvline(x=df_thr, color=diff_color, linestyle=':', linewidth=2.5, 
+               alpha=0.9, zorder=2)
+    ax.axvline(x=-df_thr, color=diff_color, linestyle=':', linewidth=2.5, 
+               alpha=0.9, zorder=2)
+    
+    # Enhanced labels and styling
+    ax.set_xlabel(f'log₂ Fold Change ({cond_1} vs {cond_2})', fontsize=14)
+    ax.set_ylabel('log₁₀ Adjusted p-value\n(Equivalence |0| -Difference)', fontsize=14)
+    
+    title = "Antler's Plot: Equivalence + Difference Testing"
+    if title_add:
+        title += f"\n{title_add}"
+    ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
+    
+    # Enhanced grid and styling
+    ax.grid(True, alpha=0.4, linestyle='--', linewidth=0.8, color='lightgray')
+    ax.tick_params(labelsize=12, length=6, width=1.2)
+    
+    # Improved legend positioned outside plot area
+    legend = ax.legend(
+        title='Legend', 
+        fontsize=11, 
+        title_fontsize=12,
+        loc='upper left',
+        # Position outside plot area
+        bbox_to_anchor=(1.025, 1.025),
+        frameon=True,
+        fancybox=True,
+        shadow=True,
+        framealpha=0.95,
+        edgecolor='black',
+        facecolor='white'
+    )
+    legend.get_title().set_fontweight('bold')
+
+    # Enhanced annotations with adjust_text (robust for 0, 1, or many annotations)
+    if protein_ids is not None and len(protein_ids) > 0:
+        annotations = []
+        points = []
+        for protein_id in protein_ids:
+            matching_rows = plot_data[plot_data[id_col] == protein_id]
+            if not matching_rows.empty:
+                row = matching_rows.iloc[0]
+                x, y = row['log2FC'], row['log10(adj_pval)']
+                # Prepare annotation text: prefer annot_col, fallback to id_col
+                if annot_col in row and pd.notnull(row[annot_col]) and str(row[annot_col]).strip():
+                    annot_text = str(row[annot_col])
+                else:
+                    annot_text = str(row[id_col])
+                if len(annot_text) > 15:
+                    annot_text = annot_text[:12] + "..."
+                status = row['Status'] if 'Status' in row else 'Unexplained'
+                bg_color, edge_color, text_color = get_annotation_colors(status)
+                
+                # Create annotation (initial offset)
+                annotation = ax.annotate(
+                    annot_text,
+                    xy=(x, y),
+                    xytext=(x + 0.2, y + 0.2),
+                    fontsize=annotation_fontsize,
+                    fontweight=annotation_fontweight,
+                    color=text_color,
+                    ha='center',
+                    va='center',
+                    bbox=dict(
+                        boxstyle="round,pad=0.4",
+                        facecolor=bg_color,
+                        edgecolor=edge_color,
+                        linewidth=annotation_edge_width,
+                        alpha=annotation_alpha
+                    ),
+                    arrowprops=arrowprops_adjust,
+                    zorder=10
+                )
+                annotations.append(annotation)
+        # # Use adjust_text if there are any annotations
+        # if annotations:
+        #     adjust_text(
+        #         annotations,
+        #         expand_points=expand_points,
+        #         expand_text=expand_text,
+        #         expand_objects=expand_objects,
+        #         arrowprops=arrowprops_adjust,
+        #         force_points=force_points,
+        #         force_text=force_text,
+        #         force_objects=force_objects,
+        #         ax=ax,
+        #         precision=0.1,
+        #         save_steps=False,
+        #         avoid_self=True,
+        #         only_move={'points': 'xy', 'text': 'xy'}
+        #     )
+
+    # Add threshold value annotations
+    if len(x_data) > 0 and len(y_data) > 0:
+        # Equivalence threshold labels
+        ax.text(eq_thr + 0.05, ax.get_ylim()[1] * 0.95, f'eq: ±{eq_thr}', 
+                rotation=90, ha='left', va='top', fontsize=10, 
+                color=eq_color, fontweight='bold', alpha=0.8)
+        
+        # Difference threshold labels  
+        ax.text(df_thr + 0.05, ax.get_ylim()[1] * 0.95, f'diff: ±{df_thr}', 
+                rotation=90, ha='left', va='top', fontsize=10, 
+                color=diff_color, fontweight='bold', alpha=0.8)
+
+    # Final layout adjustment with space for external legend
+    plt.tight_layout()
+    # Adjust the subplot to make room for the legend
+    plt.subplots_adjust(right=0.82)
+    
+    # Finalize the plot
+    finalize_plot(
+        fig, show, save, filename,
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
+    )
+
+# ======================================================================================
+# ProteoForge - Modelling
+# ======================================================================================
 
 # PeCorA's significantly different peptide compared to other peptides in a given protein (boxplot)
 def visualize_protein_peptides_boxplot(
@@ -823,7 +2153,7 @@ def visualize_protein_peptides_boxplot(
         showfliers: bool = False,
         # Saving options
         save: bool = False,
-        dont_show: bool = False,
+        show: bool = True,
         filename: str = 'PeCorA_Protein_boxplot',
         filepath: str = '',
         fileformats: list[str] = ['png', ],
@@ -976,1266 +2306,15 @@ def visualize_protein_peptides_boxplot(
 
     sns.despine(left=True, bottom=True)
     fig.tight_layout()
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-        if dont_show:
-            plt.close(fig)
-    else:
-        if dont_show:
-            plt.close(fig)
-        else:
-            return fig
 
-
-def proteinAnnotation(
-        plot_dict: dict,
-        figsize: tuple = (15, 5),
-        # Saving options
-        save: bool = False,
-        dont_show: bool = False,
-        filename: str = 'ProteinAnnotation',
-        filepath: str = '',
-        fileformats: list[str] = ['png', ],
-        dpi: int = 100,
-        transparent: bool = False       
-    ):
-    
-    # Handle default regulation_colors
-    fig, ax = plt.subplots(figsize=figsize)
-    annot_data = plot_dict["UniprotAnnotData"]
-    res_data = plot_dict["ResultSubset"]
-    regulation_colors = plot_dict["RegulationColors"]
-    npeps = len(res_data)
-
-    # Scale the figure size based on the number of peptides
-    figsize = (figsize[0]+(npeps/10), figsize[1]+(npeps/25))
-
-    # --- Default Styles and Settings ---
-    protein_height = 1
-    domain_height_scale = 1.1   # The height of each domain rectangle
-    
-    protein_color = '#e5e5e5'
-    default_colors = {
-        'DOMAIN': '#83c5be',
-        'CHAIN': '#ffddd2',
-        'SITE': '#540b0e',
-        'MOD_RES': '#ffbe0b',
-    }
-    
-    # --- Plotting UniProt Annotations ---
-    def add_uniprot_features(subset, feature_type, y_offset=0, height_scale=1):
-        """Plots UniProt annotations (domains, chains, sites)."""
-        if subset.empty: return
-        vertical_padding = ((domain_height_scale * protein_height) - protein_height) / 2
-        for _, row in subset.iterrows():
-            start, end = row["start"], row["end"]
-            if not np.isfinite(start) or not np.isfinite(end):
-                continue
-            width = end - start
-
-            # Calculate centered x and y positions
-            rect_x = (start + end) / 2 - width / 2
-            rect_y = y_offset - vertical_padding * height_scale
-            
-            patch = Rectangle((rect_x, rect_y), width, protein_height * height_scale,
-                                    facecolor=default_colors.get(feature_type, default_colors[feature_type]),
-                                    alpha=0.5, edgecolor='black')
-            ax.add_patch(patch)
-
-            # Add labels (if available)
-            if 'note' in row:
-                ax.text((start + end) / 2, rect_y + (protein_height * height_scale) / 2,
-                        row['note'], ha='center', va='center',
-                        rotation=90 if feature_type == 'DOMAIN' else 0,
-                        fontsize=10, fontweight='bold')
-    
-    # --- Plotting UniProt Annotations ---
-    def add_mod_res(subset, y_offset=1.25):
-        """Plots MOD_RES annotations."""
-        marker_styles = {  
-            'phosphorylation': 'o',
-            'acetylation': '^',
-            'methylation': 's',
-        }
-        if subset.empty: return
-        for _, row in subset.iterrows():
-            mod_pos = row["start"]
-            if not np.isfinite(mod_pos):
-                continue
-            mod_type = row["note"].lower() 
-            marker = marker_styles.get(mod_type, '*')  
-            ax.plot(mod_pos, y_offset, marker=marker, markersize=10, color=default_colors['MOD_RES'])
-
-            # Connect marker to protein rectangle
-            ax.vlines(mod_pos, 1, y_offset, linestyles='dotted', linewidth=0.5, color='gray')
-
-    # --- Plotting UniProt Annotations ---
-    def add_peptide_markers(subset):
-        """Plots peptide markers."""
-        if subset.empty: return
-        for _, peptide in subset.iterrows():
-            startpos, endpos = peptide['startpos'], peptide['endpos']
-            if not np.isfinite(startpos) or not np.isfinite(endpos):
-                continue
-            color = regulation_colors[peptide['TumorRegulation']]
-            y_offset = 1.5 + 0.2 * peptide['trace']  
-            ax.add_patch(Rectangle(
-                (startpos, y_offset - 0.1), endpos - startpos, 0.2,
-                facecolor=color, alpha=0.5, edgecolor='black'
-            ))
-            pepID = str(peptide['PeptideID'])
-            if peptide["isSignificant"]:
-                pepID += "*"
-                fs = 12
-                fw = 'bold'
-            else:
-                fs = 10
-                fw = 'normal'
-            ax.text(
-                (startpos + endpos) / 2, y_offset,
-                pepID, ha='center', va='center',
-                fontsize=fs, fontweight=fw, color="white"
-            )
-
-    # --- Plotting ---
-
-    # Protein rectangle
-    ax.add_patch(Rectangle((0, 0), plot_dict["ProteinLength"], protein_height, color=protein_color))
-
-    # UniProt annotations
-    add_uniprot_features(
-        annot_data[annot_data["feature"] == "DOMAIN"], 
-        'DOMAIN', 0.2, domain_height_scale
+    finalize_plot( 
+        fig, show, save, filename,
+        # Arguments
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
     )
-    
-    add_uniprot_features(
-        annot_data[annot_data["feature"] == "CHAIN"], 
-        'CHAIN', -0.5, 0.5
-    )
-    add_uniprot_features(
-        annot_data[annot_data["feature"] == "SITE"], 
-        'SITE'
-    )
-    add_mod_res(
-        annot_data[annot_data["feature"] == "MOD_RES"]
-    ) 
-    # Peptide markers
-    add_peptide_markers(res_data)
-
-    # --- Styling ---
-    # Additional adjustments
-    ax.set_xlim([0, plot_dict["ProteinLength"]])
-    ax.set_ylim([ax.get_ylim()[0], 2 + 0.05 * res_data['trace'].max()])
-    ax.set_xlabel('Protein Position')
-    ax.set_ylabel('Peptide Markers')
-    ax.grid("both", linestyle="--", linewidth=0.75, alpha=0.5, color="lightgrey")
-    # ax2.set_ylabel('Boxplot Values')
-    ax.set_title(f"{plot_dict['Gene']} ({plot_dict['Protein']}) - Protein Coverage: {plot_dict['ProteinCoverage']:.2f}%", fontsize=14, loc="left")
-
-    ax.legend(
-        handles=[
-            plt.Line2D([0], [0], color='#83c5be', lw=10),
-            plt.Line2D([0], [0], color='#ffddd2', lw=10),
-            plt.Line2D([0], [0], color='#540b0e', marker='v', markersize=10, linestyle='None'),
-            plt.Line2D([0], [0], color='#ffbe0b', marker='*', markersize=10, linestyle='None'),
-            plt.Line2D([0], [0], color=regulation_colors['Up'], lw=10),
-            plt.Line2D([0], [0], color=regulation_colors['Down'], lw=10),
-        ],
-        labels=['Domain', 'Chain', 'Site', 'Modification', 'Upregulated in Tumor', 'Downregulated in Tumor'],
-        title='Annotations',
-        title_fontsize=12,
-        fontsize=10,
-        loc='upper right',
-        ncols = 10,
-        frameon=False,
-        bbox_to_anchor=(1, 1.15),
-    )
-
-    ax.get_yaxis().set_visible(False)
-    sns.despine(left=True, bottom=True)
-    fig.tight_layout()
-
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-        if dont_show:
-            plt.close(fig)
-    else:
-        if dont_show:
-            plt.close(fig)
-        else:
-            return fig
-
-# #### PDF Report Generation ####        
-
-# # Helper function to split a DataFrame into smaller chunks
-# def split_dataframe(df, chunk_size):
-#     """Splits a DataFrame into smaller chunks."""
-#     for start in range(0, len(df), chunk_size):
-#         yield df[start:start + chunk_size]
-
-# def generate_multipage_pdf_report(
-#         plot_dict, 
-#         fdr_threshold=10**-3,
-#         output_filename="protein_report.pdf"
-#     ):
-#     """Generates a multi-page PDF report with data, tables, and figures."""
-
-#     with PdfPages(output_filename) as pdf:
-#         # Page 1: Protein Info
-#         first_page = plt.figure(figsize=(11.69, 8.27))  # A4 size
-#         first_page.clf()  # Clear the figure
-
-#         # Add the protein info:
-#         ax = first_page.add_subplot(111)  # Create a subplot for the protein info
-#         tmp = (
-#             f"{plot_dict['Gene']} ({plot_dict['Protein']}) - {plot_dict['ProteinLength']} aa\n\n" +
-#             f"{plot_dict['ProteinName']}\n\n" +
-#             f"{plot_dict['ProteinCoverage']:.2f}% sequence coverage\n\n"
-#         )
-#         ax.text(0.5, 0.5, tmp, ha="center", va="center", fontsize=18)
-#         ax.axis("off")  # Remove plot axes from the protein info
-
-#         pdf.savefig(first_page)
-#         plt.close(first_page)  # Close to free up memory
-
-#         # Pages for Result Subset Table
-#         table_data = plot_dict["ResultSubset"]
-#         # Check if ProteoformGroup is present 
-#         if "ProteoformGroup" in table_data.columns:
-#             table_data = table_data[[
-#                 "PeptideID", "Peptide", "startpos", "endpos", "TumorRegulation", "isSignificant", "ProteoformGroup"
-#             ]]
-#         else:
-#             table_data = table_data[[
-#                 "PeptideID", "Peptide", "startpos", "endpos", "TumorRegulation", "isSignificant"
-#             ]]
-
-#         chunk_size = 30  # Adjust based on how many rows fit on one page
-
-#         for i, chunk in enumerate(split_dataframe(table_data, chunk_size)):
-#             page = plt.figure(figsize=(11.69, 8.27))
-#             page.clf()
-            
-#             ax = page.add_subplot(111)
-#             if i == 0:
-#                 ax.text(0.5, 1.0, "Result Subset Table", ha="center", va="center", fontsize=14, transform=ax.transAxes)
-#             table = pd.plotting.table(ax, chunk, loc="center")
-#             table.auto_set_font_size(False)
-#             table.set_fontsize(6)
-#             ax.axis("off")
-
-#             pdf.savefig(page)
-#             plt.close(page)
-
-#         # Figure 1: Signf Result Boxplot
-#         fig = visualize_protein_peptides_boxplot(
-#             plot_dict
-#         )
-#         pdf.savefig(fig)  # Add the figure directly to the PDF
-#         plt.close(fig)
-        
-#         # Figure 2: Detailed Peptide Quant Value
-#         fig = detailed_peptide_line(
-#             plot_dict = plot_dict,
-#             fdr_threshold = fdr_threshold,
-#         )
-#         pdf.savefig(fig)  # Add the figure directly to the PDF
-#         plt.close(fig)
-
-#         # Figure 3: Peptide Correlation Heatmap
-#         fig = heatmap_with_clusters(
-#             plot_dict=plot_dict,
-#         )
-#         pdf.savefig(fig)  # Add the figure directly to the PDF
-#         plt.close(fig)
-
-#         # Figure 4: Protein Annotation
-#         fig = proteinAnnotation(
-#             plot_dict,
-#         )
-#         pdf.savefig(fig)  # Add the figure directly to the PDF
-#         plt.close(fig)
-
-#         # Last Pages: Uniprot Annotation Table
-#         table_data = plot_dict["UniprotAnnotData"][["feature", "start", "end", "note"]]
-#         chunk_size = 30  # Adjust based on how many rows fit on one page
-
-#         for i, chunk in enumerate(split_dataframe(table_data, chunk_size)):
-#             page = plt.figure(figsize=(11.69, 8.27))
-#             page.clf()
-            
-#             ax = page.add_subplot(111)
-#             ax.text(0.5, 1.05, f"Uniprot Annotation Table (Page {i+1})", ha="center", va="center", fontsize=14, transform=ax.transAxes)
-#             table = pd.plotting.table(ax, chunk, loc="center")
-#             table.auto_set_font_size(False)
-#             table.set_fontsize(8)
-#             ax.axis("off")
-
-#             pdf.savefig(page)
-#             plt.close(page)
-
-############################ Power Analysis Profile Plot ############################
-
-def single_variable_power_profile(
-        plot_data: pd.DataFrame,            # Input DataFrame with power analysis results
-        x_axis_variable: str,               # The variable to plot on the x-axis ("eqThr", "cvMean", or "nRep")
-        y_axis_variable: str,               # The variable to plot on the y-axis ("calc_power")
-        target_power: float,                # Desired statistical power for the test
-        # Figure parameters
-        figsize: tuple = (6, 4),            # Dimensions (width, height) of the figure in inches
-        line_color: str = "#003566",        # Color of the line plot
-        target_line_color: str = "#fca311", # Color of the line indicating the target power
-        figtitle: str = None,               # Title of the plot
-        xlabel: str = None,                 # Label for the x-axis
-        # Save parameters
-        save: bool = False,                 # Whether to save the plot (True) or not (False)
-        filename: str = "powerProfile_line",# Filename for saving the plot
-        filepath: str = "",                 # Directory path for saving the plot
-        fileformat: list[str] = ["png"],    # List of file formats to save the plot in (e.g., ["png", "pdf"])
-        dont_show: bool = False,            # If True, the plot won't be displayed interactively
-    ):
-    """
-        Plots the power analysis profile for a single variable against the achieved power.
-
-        This function generates a line plot illustrating how the statistical power
-        varies with changes in a single experimental parameter (equivalence threshold,
-        mean coefficient of variation, or number of replicates). The plot includes a
-        horizontal line indicating the target power, error bars representing standard
-        deviation, and an annotation detailing the simulation parameters.
-
-    """
-
-    # Validate the input for x-axis variable
-    if x_axis_variable not in ["eqThr", "cvMean", "nRep"]:
-        raise ValueError("Invalid x_axis_variable. Choose from 'eqThr', 'cvMean', or 'nRep'.")
-
-    cvMean = plot_data["cvMean"].unique()[0]
-    nRep = plot_data["nRep"].unique()[0]
-    pThr = plot_data["pThr"].unique()[0]
-    corr = plot_data["corr"].unique()[0]
-    eqThr = plot_data["eqThr"].unique()[0]
-    nRepeats = plot_data["iteration"].max() + 1
-
-    # Create the plot
-    fig, ax = plt.subplots(figsize=figsize)
-
-    # Plot the mean power values
-    sns.lineplot(
-        x=x_axis_variable,   
-        y=y_axis_variable, 
-        data=plot_data,      
-        ax=ax,              
-        color=line_color,    
-        linewidth=2.5,
-        marker="o",
-        markersize=8,
-        markerfacecolor="white",
-        markeredgewidth=1.5,
-        markeredgecolor=line_color,
-        n_boot=1000,       
-        errorbar=("sd"),  
-    )
-
-    # Adjust the y-axis limits
-    ax.set_ylim(-0.05, 1.05) 
-
-    # Set the title dynamically based on the x-axis variable
-    if figtitle is None:
-        figtitle = f"Power Analysis: Effect of {x_axis_variable.replace('_', ' ').capitalize()}"
-    ax.set_title(
-        figtitle, 
-        fontsize=12, 
-        fontweight="bold", 
-        loc="left",
-        pad=20
-    )
-
-    # Set the x-axis label dynamically based on the x-axis variable
-    if xlabel is None:
-        xlabel = x_axis_variable.replace("_", " ").capitalize()
-    ax.set_xlabel(
-        xlabel, 
-        fontsize=10, 
-        fontweight="bold", 
-        labelpad=10
-    )
-
-    # Set the y-axis label
-    ax.set_ylabel(
-        "Power (Difference from Adjusted SEI)", 
-        fontsize=10, 
-        fontweight="bold",
-        labelpad=10
-    )
-
-    # Add text annotation with parameters, excluding the x-axis variable
-    annotation_text = f"Target Power: {target_power} | Parameters: "
-    if x_axis_variable != "eqThr":
-        annotation_text += f"eqThr = {eqThr}, "
-    if x_axis_variable != "meanCV":
-        annotation_text += f"CV% = {cvMean:.2f}, "
-    if x_axis_variable != "nRep":
-        annotation_text += f"n = {nRep}, "
-    annotation_text += f"pThr = {pThr}, Cor = {corr}, repeat = {nRepeats}"
-
-    ax.text(
-        x=0.0,
-        y=1.025,
-        s=annotation_text,
-        fontsize=8,
-        fontstyle="italic",
-        ha="left",
-        va="bottom",
-        transform=ax.transAxes
-    )
-
-    # Add a horizontal line to indicate the target power
-    ax.axhline(
-        y=target_power,  
-        color=target_line_color, 
-        linestyle="--",
-        linewidth=1.5,
-        label="Target Power"
-    )
-
-    # Add gridlines for better readability
-    ax.grid(
-        axis="both", 
-        color="lightgray", 
-        alpha=0.5, 
-        linestyle="--", 
-        linewidth=0.5
-    )
-
-    # Remove top and right spines for a cleaner look
-    sns.despine(left=True, bottom=True)
-    plt.tight_layout()  # Adjust layout for better visual appeal
-
-    # Save the plot if requested
-    if save:
-        save_figures(
-            plt.gcf(), 
-            filename=filename, 
-            filepath=filepath, 
-            fileformat=fileformat
-        )
-        if dont_show:  # Close the plot if not showing interactively
-            plt.close()
-
-def single_variable_SEI_profile(
-        plot_data: pd.DataFrame,            # Input DataFrame with power analysis results
-        cv_data: pd.DataFrame,              # CV distribution data (long format for plotting)
-        x_axis_variable: str,               # The variable to plot on the x-axis ("eqThr", "cvMean", or "nRep")
-        y_axis_variable: str,               # The variable to plot on the y-axis ("calc_SEI")
-        target_variable: str,               # The variable to plot as a horizontal line for Adjusted SEI 
-
-        # Figure parameters
-        figsize: tuple = (6, 4),            # Dimensions (width, height) of the figure in inches
-        figwidthratio: list = [3, 1],       # Width ratio for the subplots
-        line_color: str = "#003566",        # Color of the line plot
-        target_line_color: str = "#fca311", # Color of the line indicating the target power
-        ideal_line_color: str = "#8d0801",  # Color of the line indicating the ideal SEI
-        figtitle: str = None,               # Title of the plot
-        xlabel: str = None,                 # Label for the x-axis
-
-        # Save parameters
-        save: bool = False,                 # Whether to save the plot (True) or not (False)
-        filename: str = "SEI_profile_line", # Filename for saving the plot
-        filepath: str = "",                 # Directory path for saving the plot
-        fileformat: list[str] = ["png"],    # List of file formats to save the plot in (e.g., ["png", "pdf"])
-        dont_show: bool = False,            # If True, the plot won't be displayed interactively
-    ):
-    """Plots the SEI analysis profile for a single variable against the achieved SEI.
-    """
-
-    # Validate the input for x-axis variable
-    if x_axis_variable not in ["eqThr", "cvMean", "nRep"]:
-        raise ValueError("Invalid x_axis_variable. Choose from 'eqThr', 'cvMean', or 'nRep'.")
-
-    cvMean = plot_data["cvMean"].unique()[0]
-    nRep = plot_data["nRep"].unique()[0]
-    pThr = plot_data["pThr"].unique()[0]
-    corr = plot_data["corr"].unique()[0]
-    eqThr = plot_data["eqThr"].unique()[0]
-    nRepeats = plot_data["iteration"].max() + 1
-
-    # Create the plot
-    fig, ax = plt.subplots(
-        nrows=1,
-        ncols=2,
-        figsize=figsize,
-        gridspec_kw={
-            "width_ratios": figwidthratio,
-            "wspace": 0.0
-        }
-    )
-
-    
-    sns.lineplot(
-        ax=ax[0],
-        x=x_axis_variable,   
-        y=y_axis_variable, 
-        data=plot_data,                 
-        color=line_color,    
-        linewidth=2.5,
-        marker="o",
-        markersize=8,
-        markerfacecolor="white",
-        markeredgewidth=1.5,
-        markeredgecolor=line_color,
-        n_boot=1000,       
-        errorbar=("sd"),  
-    )
-
-    # Adjust the y-axis limits
-    ax[0].set_ylim(-0.05, 1.05) 
-
-    # Set the title dynamically based on the x-axis variable
-    if figtitle is None:
-        figtitle = f"SEI Analysis: Effect of {x_axis_variable.replace('_', ' ').capitalize()}"
-    ax[0].set_title(
-        figtitle, 
-        fontsize=12, 
-        fontweight="bold", 
-        loc="left",
-        pad=20
-    )
-
-    # Set the x-axis label dynamically based on the x-axis variable
-    if xlabel is None:
-        xlabel = x_axis_variable.replace("_", " ").capitalize()
-    ax[0].set_xlabel(
-        xlabel, 
-        fontsize=10, 
-        fontweight="bold", 
-        labelpad=10
-    )
-
-    # Set the y-axis label
-    ax[0].set_ylabel(
-        "Calculated SEI", 
-        fontsize=10, 
-        fontweight="bold",
-        labelpad=10
-    )
-
-    # Set the Ideal SEI label
-    ax[0].axhline(
-        y=1,
-        color=ideal_line_color,
-        linestyle="--",
-        label=f"Ideal SEI (1.00)",
-    )
-
-    if x_axis_variable != "cvMean": 
-        # Add a horizontal line to indicate the target (adjusted) SEI
-        target_var = 1 - cvMean / 100
-        ax[0].axhline(
-            y=target_var,  
-            color=target_line_color, 
-            linestyle="--",
-            linewidth=1.5,
-            label=f"Adjusted SEI ({target_var:.2f})"
-        )
-        annotation_text = f"CV Adjusted SEI: {target_var} | Parameters: "
-    else:
-        sns.lineplot(
-            x=x_axis_variable,   
-            y=target_variable, 
-            data=plot_data,      
-            ax=ax[0],              
-            color=target_line_color,    
-            linewidth=1.5,
-            linestyle="--",
-            label=f"Adjusted SEI"
-        )
-        annotation_text = f"Parameters: "
-
-    # Add text annotation with parameters, excluding the x-axis variable
-    if x_axis_variable != "eqThr":
-        annotation_text += f"eqThr = {eqThr}, "
-    if x_axis_variable != "cvMean":
-        annotation_text += f"CV% = {cvMean:.2f}, "
-    if x_axis_variable != "nRep":
-        annotation_text += f"n = {nRep}, "
-    annotation_text += f"pThr = {pThr}, Cor = {corr}, repeat = {nRepeats}"
-
-    ax[0].text(
-        x=0.0,
-        y=1.025,
-        s=annotation_text,
-        fontsize=8,
-        fontstyle="italic",
-        ha="left",
-        va="bottom",
-        transform=ax[0].transAxes
-    )
-    # Set the legend
-    ax[0].legend(
-        frameon=False,
-        # loc="upper right",
-        fontsize=8,
-        # bbox_to_anchor=(1, 1.125)
-    )
-
-    # Plot the CV distribution
-    sns.violinplot(
-        ax=ax[1],
-        data=cv_data,
-        x="cvMean",
-        y="cvDist",
-        color="lightgray",
-        linewidth=0.5,
-        cut=0,
-        scale="width",
-        # inner="quartile",
-    )
-    # ax[1].set_tit
-    ax[1].set_ylabel("CV (ratio)")
-    ax[1].set_xlabel(f"CV Distribution(s)")
-    # Place y-axis on the right
-    ax[1].yaxis.tick_right()
-    ax[1].yaxis.set_label_position("right")
-
-    # Add gridlines for better readability
-    for i in range(2):
-        ax[i].grid(
-            axis="both", 
-            color="lightgray", 
-            alpha=0.5, 
-            linestyle="--", 
-            linewidth=0.5
-        )
-
-    # Remove top and right spines for a cleaner look
-    sns.despine(left=True, bottom=True)
-    plt.tight_layout()  
-    
-    # Save the plot if requested
-    if save:
-        save_figures(
-            plt.gcf(), 
-            filename=filename, 
-            filepath=filepath, 
-            fileformat=fileformat
-        )
-        if dont_show:  # Close the plot if not showing interactively
-            plt.close()
-
-def heatmap_powerPerSetup(
-    plot_data: pd.DataFrame,  # Input DataFrame with Calculated_EQ and nReps
-    adjs_SEI: float,  # Adjusted SEI value
-
-    # Figure settings
-    figsize: tuple = (8, 4),
-
-    # Labels and titles
-    title: str = "Power Analysis for Equivalence Boundaries and Replicates",
-    title_fontsize: int = 12,
-    title_loc: str = "left",
-    title_pad: float = 10,
-    xlabel: str = "Symmetrical Equivalence Boundary as LFC",
-    ylabel: str = "# of Replicates",
-    cbar_label: str = "Power (Difference from Adjusted SEI)",
-
-    # Heatmap styling
-    cmap: str = "Greys",
-    annot: bool = True,
-    fmt: str = ".2f",
-    vmin: float = 0,
-    vmax: float = 1,
-    cbar_orientation: str = "vertical",
-    cbar_pad: float = 0.02,
-
-    # Save parameters
-    save: bool = False,
-    filename: str = "power_analysis_heatmap",
-    filepath: str = "",
-    fileformat: list[str] = ["png"],
-    dont_show: bool = False,
-):
-    """
-    Creates a heatmap to visualize the power analysis for different equivalence boundaries
-    and replicate numbers.
-
-    Args:
-        plot_data: DataFrame containing 'Calculated_EQ' and 'nReps' columns.
-        adjs_SEI: Adjusted SEI value.
-        ...: Other parameters for customization.
-    """
-
-    # Calculate power
-    plot_data["Power"] = plot_data.apply(
-        lambda x: tests.calculate_power(
-            x["Calculated_EQ"], 
-            adjs_SEI
-        ), axis=1
-    )
-
-    # Pivot the DataFrame
-    tmp_df = plot_data.pivot_table(
-        index="nReps", 
-        columns="B_eq", 
-        values="Power", 
-        aggfunc="mean"
-    )
-    tmp_df.columns = tmp_df.columns.map(lambda x: f"{x:.2f}")
-    tmp_df.index = tmp_df.index.map(lambda x: f"{x:.0f}")
-
-    # Create the heatmap
-    fig, ax = plt.subplots(figsize=figsize)
-    sns.heatmap(
-        data=tmp_df,
-        cmap=cmap,
-        annot=annot,
-        fmt=fmt,
-        cbar_kws={
-            "label": cbar_label,
-            "orientation": cbar_orientation,
-            "pad": cbar_pad,
-        },
-        vmin=vmin,
-        vmax=vmax,
-        ax=ax,
-    )
-
-    ax.set_title(
-        title, 
-        fontsize=title_fontsize, 
-        fontweight="bold", 
-        loc=title_loc, 
-        pad=title_pad
-    )
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-
-    plt.tight_layout()
-
-    # Saving
-    if save:
-        save_figures(
-            plt.gcf(), 
-            filename=filename, 
-            filepath=filepath, 
-            fileformat=fileformat
-        )
-        if dont_show:
-            plt.close()
-
-# Call the function
-def single_pair_summary(
-        data: pd.DataFrame,
-        total_proteins: int,
-        pair_names: tuple,
-        # Data related parameters
-        df_pval: str = "df_p",
-        df_qval: str = "df_adjp",
-        eq_pval: str = "eq_p",
-        eq_qval: str = "eq_adjp",
-        log2FC: str = "log2FC",
-        logQvalue: str = "log10(adj_pval)",
-        status: str = "Status",
-        # Stats related parameters
-        pThr: float = 0.05, 
-        dfThr: float = 1,
-        eqThr: float = 1,            
-        corr_name: str = "FDR",
-        # Plot parameters
-        figsize: tuple = (10, 5),
-        offset: float = .75,
-        save: bool = False,
-        filename: str = "single_pair_summary",
-        filepath: str = "",
-        fileformat: list[str] = ["png", "svg", "pdf"], 
-        dont_show: bool = False,
-    ):
-    """
-
-    """
-
-    # Check if corr_name is None set as string
-    if corr_name is None: corr_name = "None"
-    
-    # Create a counts dataframe 
-    cnts = data[status].value_counts()
-    cnts["Excluded"] = total_proteins - cnts.sum()
-    cnts = cnts.reset_index()
-    cnts.columns = ["Status", "Count"]
-
-    # Initialize the figure
-    fig = plt.figure( figsize=figsize )
-    grid = gridspec.GridSpec(
-        nrows=2, ncols=3, 
-        width_ratios=[ 0.3, 0.6, 0.1 ], 
-        wspace=0.2, hspace=0.3
-    )
-
-    # Calculate the lim maxes
-    ymax = data[logQvalue].abs().max() + offset
-    xmax = data[log2FC].abs().max() + offset
-
-    # Initialize the axes
-    ax1 = plt.subplot(grid[0, 0]) # T-test pvalue dist
-    ax2 = plt.subplot(grid[1, 0]) # TOST pvalue dist
-    ax3 = plt.subplot(grid[:, 1:2]) # Antlers Plot
-    ax4 = plt.subplot(grid[:, 2]) # Protein Status Counts
-
-    # Plot T-test Histogram of P- & Adj.P-values
-    sns.histplot(
-        data=data,
-        x=df_pval,
-        ax=ax1,
-        color=stat_colors[-1],
-        label="P-Value",
-        common_norm=False,
-        element="step",
-        fill=False,
-        linewidth=2,
-    )
-    sns.histplot(
-        data=data,
-        x=df_qval,
-        ax=ax1,
-        color=stat_colors[-2],
-        label="Adj.P-Value ( " + corr_name + " )",
-        common_norm=False,
-        element="step",
-        fill=False,
-        linewidth=2,
-    )
-    ax1.set_title( "T-Test (Difference)", y=1, fontsize=12 )
-    ax1.legend( loc="upper right", frameon=False )
-    # Add styling to the plot
-    ax1.set_xlim([0, 1])
-    ax1.grid( axis="both", color="lightgray", alpha=0.5, linestyle="--", linewidth=0.5 )
-    ax1.set_xlabel("")
-    ax1.set_ylabel("Frequency")
-    ax1.set_xticklabels([])
-    ax1.spines["top"].set_visible(False)
-    ax1.spines["right"].set_visible(False)
-    ax1.spines["bottom"].set_visible(False)
-    # ax1.spines["left"].set_visible(False)
-
-    sns.histplot(
-        data=data,
-        x=eq_pval,
-        ax=ax2,
-        color=stat_colors[1],
-        label="P-Value",
-        common_norm=False,
-        element="step",
-        fill=False,
-        linewidth=2,
-    )
-    sns.histplot(
-        data=data,
-        x=eq_qval,
-        ax=ax2,
-        color=stat_colors[0],
-        label="Adj.P-Value ( " + corr_name + " )",
-        common_norm=False,
-        element="step",
-        fill=False,
-        linewidth=2,
-    )
-    ax2.set_title( "TOST (Equivalence)", y=1, fontsize=12 )
-    ax2.legend( loc="upper right", frameon=False, )
-    ax2.set_xlim([0, 1])
-    ax2.grid( axis="both", color="lightgray", alpha=0.5, linestyle="--", linewidth=0.5 )
-    ax2.set_xlabel("P-Value")
-    ax2.set_ylabel("Frequency")
-    # ax2.set_xticklabels([])
-    ax2.spines["top"].set_visible(False)
-    ax2.spines["right"].set_visible(False)
-    # ax2.spines["bottom"].set_visible(False)
-    # ax2.spines["left"].set_visible(False)
-
-    # Plot Mutant Volcano Plot
-    sns.scatterplot(
-        data=data,
-        x=log2FC,
-        y=logQvalue,
-        hue=status,
-        ax=ax3,
-        palette=status_palette,
-        # alpha=0.5,
-        s=100,
-        linewidth=0.5,
-        edgecolor="white",
-        rasterized=True,
-    )
-    ax3.set_xlim([-xmax, xmax])
-    ax3.set_ylim([-ymax, ymax])
-    ax3.set_title( "Antlers Plot", y=1, fontsize=12 )
-    ax3.set_xlabel("log2FC")
-    ax3.set_ylabel( "log10(Adj.P-value)", labelpad=-5 )
-    ax3.legend( loc="lower left", frameon=False, ).remove()
-    ax3.grid( axis="both", color="lightgray", alpha=0.5, linestyle="--", linewidth=0.5 )
-
-    # Add lines to the plot to indicate the thresholds
-    # For the Adj. P-value threshold (pThr)
-    ax3.axhline( y=-np.log10(pThr), color="#99999975", linestyle="--", linewidth=1.5, )
-    ax3.axhline(y=np.log10(pThr), color="#99999975", linestyle="--", linewidth=1.5)
-    ax3.axvline(x=dfThr, color=stat_colors[-1], linestyle="--", linewidth=1.5, alpha=0.75)
-    ax3.axvline(x=-dfThr, color=stat_colors[-1], linestyle="--", linewidth=1.5, alpha=0.75)
-    ax3.axvline(x=eqThr, color=stat_colors[1], linestyle="--", linewidth=1.5, alpha=0.75)
-    ax3.axvline(x=-eqThr, color=stat_colors[1], linestyle="--", linewidth=1.5, alpha=0.75)
-
-    # Plot Protein Status Count Plot
-    sns.barplot(
-        data=cnts,
-        x="Count",
-        y="Status",
-        ax=ax4,
-        palette=status_palette,
-        rasterized=True,
-        order=list(status_palette.keys())
-    )   
-    # Add the counts to the plot
-    for p in ax4.patches:
-        width = p.get_width()
-        if width > 0: width = int(width)
-        else: width = 0
-        ax4.text(
-            width + 0.15,
-            p.get_y() + p.get_height() / 2,
-            width,
-            ha="left",
-            va="center",
-            fontsize=12,
-            color="k",
-        )
-
-    ax4.set_title( "Protein Count per Status", y=1, fontsize=12 )
-    ax4.set_xlabel("Protein Count")
-    ax4.set_xticks([])
-    ax4.set_xticklabels([])
-    ax4.set_ylabel("")
-    # Rotate the y-axis ticklabels to be parallel to the y-axis
-    ax4.set_yticklabels(
-        ax4.get_yticklabels(), 
-        rotation=90, 
-        horizontalalignment="center", 
-        verticalalignment="center", 
-        fontsize=12
-    )
-    ax4.spines["top"].set_visible(False)
-    ax4.spines["right"].set_visible(False)
-    ax4.spines["bottom"].set_visible(False)
-    ax4.spines["left"].set_visible(False)
-    
-    fig.suptitle(
-        (
-            "Single Pair's Test Summary ("+ 
-            pair_names[0] + 
-            " vs " + 
-            pair_names[1] + 
-            ")"
-        ),
-        fontsize=14, 
-        y=.975,
-    )
-
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename+"_"+pair_names[0]+"_vs_"+pair_names[1],
-            filepath=filepath,
-            fileformat=fileformat
-        )
-        if dont_show:
-            plt.close(fig)   
-
-################################ Benchmarking Plots ################################
-
-def draw_fpr_across_thresholds(
-    pfg_metrics_data: pd.DataFrame,
-    pthr: float,
-    threshold_col: str = "threshold",
-    figsize: tuple = (6, 4),
-    color: str = 'black',
-    linewidth: int = 2,
-    marker: str = 'o',
-    markersize: int = 15,
-    markerfacecolor: str = 'white',
-    markeredgewidth: float = 1.5,
-    markeredgecolor: str = 'black'
-) -> None:
-    """
-    Draws the False Positive Rate (FPR) across thresholds.
-
-    Parameters:
-    - pfg_metrics_data (pd.DataFrame): DataFrame containing the metrics data.
-    - pthr (float): The threshold value for drawing the vertical line.
-    - figsize (tuple): Size of the figure.
-    - color (str): Color of the line plot.
-    - linewidth (int): Width of the line plot.
-    - marker (str): Marker style for the line plot.
-    - markersize (int): Size of the markers.
-    - markerfacecolor (str): Face color of the markers.
-    - markeredgewidth (float): Edge width of the markers.
-    - markeredgecolor (str): Edge color of the markers.
-    """
-    fig, ax = plt.subplots(figsize=figsize)
-    pfg_metrics_data['-log10(Threshold)'] = -np.log10(pfg_metrics_data[threshold_col])
-    # Remove infinite values
-    pfg_metrics_data.replace([np.inf, -np.inf], np.nan, inplace=True)
-    pfg_metrics_data.dropna(subset=['-log10(Threshold)'], inplace=True)
-    sns.lineplot(
-        data=pfg_metrics_data,
-        x='-log10(Threshold)',
-        y='FPR',
-        hue='Method',
-        ax=ax,
-        color=color,
-        linewidth=linewidth,
-        marker=marker,
-        markersize=markersize,
-        dashes=False,
-        markerfacecolor=markerfacecolor,
-        markeredgewidth=markeredgewidth,
-        markeredgecolor=markeredgecolor,
-    )
-    # Set ylimit to 1
-    ax.set_ylim(-0.05, 1.05)
-    # Set the axis labels
-    ax.set_xlabel("-log10(Threshold)")
-    ax.set_ylabel("False Positive Rate")
-    ax.set_title("False Positive Rate across Thresholds")
-    ax.grid("both", linestyle="--", linewidth=0.5, alpha=0.5, color="lightgrey")
-    ax.legend(title="Method", frameon=False, loc="upper right", ncol=1)
-    # Draw a vertical line at pthr and write the FPR value at that point
-    ax.axvline(-np.log10(pthr), color="red", linestyle="--", linewidth=1)
-    ax.text(
-        -np.log10(pthr) + 0.1, .95, 
-        f"FPR: {pfg_metrics_data[pfg_metrics_data[threshold_col] == pthr]['FPR'].values[0]:.2f}",
-        rotation=0, fontsize=12, color="red"
-    )
-    # Write a note about the plot (no True Positives in this case that's why only FPR is shown)
-    ax.text(
-        0.5, 0.5, 
-        "No True Positives expected in this case\nOnly False Positives are shown",
-        ha="center", va="center", fontsize=12, fontstyle="italic", 
-        transform=ax.transAxes
-    )
-    plt.tight_layout()
-
-# TODO: This function is very specific to the data and needs to be generalized
-# TODO: Need to make it more modular and controllable by the user
-def detailed_peptide_line_simVer(
-        data: pd.DataFrame,
-        cur_protein: str,
-        condition_palette: dict,
-        cluster_palette: dict,
-        preferred_pval: float = 0.05,
-        
-        # Plotting parameters
-        figsize: tuple = (12, 12),
-
-    ):
-
-    # plot_data = data.sort_values(['startpos', 'endpos']).copy()
-    plot_data = data.copy()
-    # If ProteinID is not present, calculate based on startpos and endpost and make from 0-based to 1-based
-    if "PeptideID" not in plot_data.columns:
-        plot_data["PeptideID"] = plot_data['Peptide']
-    plot_data["-log10(adj.pval)"] = -np.log10(plot_data['adj.pval'])
-        
-    ## Define the kwargs for plots
-    lineplot_params = {
-        "alpha": 0.75,
-        "marker": "o",
-        "markersize": 10,
-        "markeredgewidth": 0,
-        "linewidth": 1.5,
-        "linestyle": "-",
-        "dashes": False,
-        "err_style": "bars",
-        "errorbar": ('se', 1.5),
-        "err_kws": {
-            "capsize": 5, 
-            "elinewidth": 2.5, 
-            "capthick": 2.5, 
-            "zorder": 1, 
-            "linewidth": 1.5
-        },
-    }
-    scatterplot_params = {
-        "s": 125,
-        "edgecolor": "None",
-        "linewidth": 1,
-        "alpha": 0.75,
-        "markers": {True: "*", False: "s"}
-    }
-    legend_params = {
-        "fontsize": 10,
-        "title_fontsize": 12,
-        "edgecolor": "black",
-        "facecolor": "white",
-        "frameon": False,
-        "ncol": 1,
-        "markerscale": 1.5,
-        "labelspacing": 0.5,
-    }
-
-    ## Initialize the figure
-    fig, ax = plt.subplots(
-        figsize=figsize,
-        ncols=1, nrows=3, 
-        sharex=True, sharey=False,
-        gridspec_kw={ "height_ratios": [1, .5, 1], "hspace": 0.01 }
-    )
-
-    # First Plot shows the adjusted intensity values
-    sns.lineplot(
-        ax=ax[0],
-        data=plot_data,
-        x="PeptideID",
-        y="adjIntensity",
-        hue="Condition",
-        palette=condition_palette,
-        **lineplot_params
-    )
-    ax[0].set_ylabel("Control Adjusted Intensity", fontsize=12)
-    ax[0].legend(**legend_params, title="Condition", loc="upper right", bbox_to_anchor=(1.1, 1))
-
-    subset = plot_data[["PeptideID", "adj.pval", "pertPeptide"]].drop_duplicates()
-    # Add * for the peptides with adjusted p-value < 0.05
-    for i, row in subset[subset["adj.pval"] < preferred_pval].iterrows():
-        ax[0].text(
-            row["PeptideID"],
-            0 ,
-            "*",
-            fontsize=25,
-            color="black",
-            ha="center",
-            va="center",
-        )
-
-    # Create data for pepClusters
-    pepClusters = plot_data[['PeptideID', '-log10(adj.pval)', 'cluster_id', 'isSignificant']].drop_duplicates()
-    # Second Plot shows the adjusted p-values
-    sns.scatterplot(
-        ax=ax[1],
-        data=pepClusters,
-        x="PeptideID",
-        y="-log10(adj.pval)",
-        style="isSignificant",
-        color='k',
-        **scatterplot_params
-    )
-    ax[1].set_ylabel("-Log10(FDR)", fontsize=12)
-    ax[1].legend(**legend_params, title="Singf. Peptide", loc="upper right", bbox_to_anchor=(1.1, 1))
-
-    # Draw a line at preferred p-value threshold
-    ax[1].axhline(
-        -np.log10(preferred_pval),
-        color="salmon",
-        linestyle="--",
-        linewidth=1.5,
-        alpha=0.5,
-        zorder=0
-    )
-
-    minLine = pepClusters["-log10(adj.pval)"].min()
-    maxLine = pepClusters["-log10(adj.pval)"].max()
-    
-    # Add the clusters as rectangles with color
-    for i, row in pepClusters.iterrows():
-        # Add the rectangle using mixed coordinates
-        ax[1].add_patch(
-            plt.Rectangle(
-                (row["PeptideID"] - 0.5, minLine),  # x in data coordinates, 
-                1,
-                maxLine - minLine,
-                transform=ax[1].get_xaxis_transform(),  # Use x-axis coordinates
-                color=cluster_palette[row["cluster_id"]],
-                alpha=.5,
-                zorder=1,
-                linewidth=1.5,
-                edgecolor="black",
-            )
-        )
-    # Add a secondary legend for the clusters (without removing the condition legend)
-    handles = []
-    labels = []
-    for cluster, color in cluster_palette.items():
-        handles.append(plt.Line2D([0], [0], color=color, lw=10))
-        labels.append(f"{cluster}")
-    # add another axis for the legend
-    ax2 = ax[1].twinx()
-    ax2.set_yticks([])
-    ax2.set_yticklabels([])
-    ax2.legend(
-        handles,
-        labels,
-        **legend_params,
-        title="Clusters",
-        loc="upper right",
-        bbox_to_anchor=(1.1, 0.5)
-    )
-
-    # Third Plot shows the log10 intensity values
-    sns.lineplot(
-        ax=ax[2],
-        data=plot_data,
-        x="PeptideID",
-        y="log10Intensity",
-        hue="Condition",
-        palette=condition_palette,
-        **lineplot_params
-    )
-
-    ax[2].set_ylabel("Log10 Raw Intensity", fontsize=12)
-    ax[2].set_xlabel(f"PeptideIDs in {cur_protein} (Ordered by Start Position)", fontsize=12)
-    ax[2].legend(**legend_params, title="Condition", loc="upper right", bbox_to_anchor=(1.1, 1))
-    
-    for i in range(3):
-        ax[i].grid("both", linestyle="--", linewidth=0.5, alpha=0.5, color="lightgrey")
-        for j in subset.loc[subset["pertPeptide"], ["PeptideID"]].drop_duplicates().values:
-            ax[i].axvline(
-                j,
-                color='black', 
-                linestyle='--', 
-                linewidth=1.5, 
-                alpha=0.5, 
-                zorder=0
-            )
-
-    ax[0].set_title(
-        f"Detailed Quantitative Look at ({cur_protein}) ", 
-        fontsize=14, loc="left", fontweight="bold", pad=20
-    )
-    # Add a descriptive text below the title
-    ax[0].text(
-        0, 1.025, 
-        f"Adjusted and Raw Intensities as well as the Adjusted P-value from the linear model interaction shown across peptides.",
-        ha="left", va="center", fontsize=12, fontstyle="italic", 
-        transform=ax[0].transAxes
-    )
-
-    # Align y-axis labels
-    fig.align_ylabels(ax)
-    plt.tight_layout()
-
-################################### New Plotting Functions ###################################
 
 def detailed_peptide_with_clusters(
         data: pd.DataFrame,    
@@ -2252,14 +2331,14 @@ def detailed_peptide_with_clusters(
         rawIntensity_col: str  = "log10(Intensity)",
         adjIntensity_col: str  = "adjIntensity",
         
-        ## Palettes
         condition_palette: dict = None,
         cluster_palette: dict = None,
+        perturbed_peptide_col: Optional[str] = None,
         # Plotting parameters
         figsize: tuple = (12, 9),
         # Saving options
         save: bool = False,
-        dont_show: bool = False,
+        show: bool = True,
         filename: str = 'detailed_peptide_with_clusters',
         filepath: str = '',
         fileformats: list[str] = ['png', ],
@@ -2278,7 +2357,7 @@ def detailed_peptide_with_clusters(
         "linestyle": "-",
         "dashes": False,
         "err_style": "bars",
-        "errorbar": ('se', 1.5),
+        "errorbar": ('ci', 95),
         "err_kws": {
             "capsize": 5, 
             "elinewidth": 2.5, 
@@ -2307,8 +2386,14 @@ def detailed_peptide_with_clusters(
 
     # Copy the data
     plot_data = data[data[protein_col] == cur_protein].copy()
+    # Early return if no data for this protein
+    if plot_data.shape[0] == 0:
+        print(f"No data found for protein: {cur_protein}")
+        return None
     plot_data['isSignificant'] = plot_data[pvalue_col] <= pThr
-    plot_data["-log10(adj.pval)"] = -np.log10(plot_data[pvalue_col])
+    # Guard against zero p-values
+    safe_p = plot_data[pvalue_col].replace(0, np.finfo(float).tiny)
+    plot_data["-log10(adj.pval)"] = -np.log10(safe_p)
     
     if condition_palette is None:
         colors = sns.color_palette(
@@ -2321,45 +2406,58 @@ def detailed_peptide_with_clusters(
         ).as_hex()
         cluster_palette = dict(zip(plot_data[cluster_col].unique(), colors))
 
+    # Determine perturbed peptides if column provided
+    perturbed_peptides = set()
+    if perturbed_peptide_col is not None and perturbed_peptide_col in plot_data.columns:
+        # Expect a boolean or indicator per row; collect peptide ids that are perturbed
+        mask = plot_data[perturbed_peptide_col].notna() & (plot_data[perturbed_peptide_col].astype(bool))
+        perturbed_peptides = set(plot_data.loc[mask, peptide_col].unique())
+
     ## Initialize the figure
     fig, ax = plt.subplots(
         figsize=figsize, ncols=1, nrows=3, 
         sharex=True, sharey=False,
         gridspec_kw={ "height_ratios": [1, .5, 1], "hspace": 0.01 }
     )
+    # Create an explicit ordered categorical for peptide positions so we can draw patches reliably
+    ordered_peptides = plot_data[peptide_col].drop_duplicates().tolist()
+    plot_data[peptide_col] = pd.Categorical(plot_data[peptide_col], categories=ordered_peptides, ordered=True)
+    plot_data = plot_data.sort_values(by=[peptide_col])
+    plot_data['_xpos'] = plot_data[peptide_col].cat.codes
     # First Plot shows the adjusted intensity values
     sns.lineplot(
         ax=ax[0],
         data=plot_data,
-        x=peptide_col,
+        x='_xpos',
         y=adjIntensity_col,
         hue=condition_col,
         palette=condition_palette,
         **lineplot_params
     )
     ax[0].set_ylabel("Adjusted Intensity", fontsize=12)
-    ax[0].legend(**legend_params, title="Condition", loc="upper right", bbox_to_anchor=(1.1, 1))
+    # Dynamically adjust bbox_to_anchor for legend so that the leftmost side aligns at x=1.1
+    legend = ax[0].legend(**legend_params, title="Condition", loc="upper right", bbox_to_anchor=(1.1, 1))
+    fig.canvas.draw()  # Needed to get correct legend size
+    legend_width = legend.get_window_extent().width / fig.dpi / fig.get_size_inches()[0]  # width in axes fraction
+    # Calculate new x anchor so left side is at 1.1
+    ncol = legend_params.get("ncol", 1)
+    if ncol > 1:
+        # For multi-column, width is less predictable, so skip adjustment
+        pass
+    else:
+        # Only adjust for single-column legends
+        new_x = 1.1 + legend_width
+        legend.set_bbox_to_anchor((1.1 + legend_width, 1))
 
-    # subset = plot_data[[peptide_col, pvalue_col]].drop_duplicates()
-    # for i, row in subset[subset[pvalue_col] < pThr].iterrows():
-    #     ax[0].text(
-    #         row[peptide_col],
-    #         0 ,
-    #         "*",
-    #         fontsize=25,
-    #         color="black",
-    #         ha="center",
-    #         va="center",
-    #     )
     # Create a cluster
     pepClusters = plot_data[[
-        peptide_col, '-log10(adj.pval)', cluster_col, 'isSignificant'
+    peptide_col, '-log10(adj.pval)', cluster_col, 'isSignificant', '_xpos'
     ]].drop_duplicates()
     # Second Plot shows the adjusted p-values
     sns.scatterplot(
         ax=ax[1],
         data=pepClusters,
-        x=peptide_col,
+        x='_xpos',
         y='-log10(adj.pval)',
         style='isSignificant',
         color='k',
@@ -2382,13 +2480,19 @@ def detailed_peptide_with_clusters(
     # Draw rectangles as background for clusters in the second plot
     minLine = pepClusters["-log10(adj.pval)"].min() - offset
     maxLine = pepClusters["-log10(adj.pval)"].max() + offset
+    threshold_line = -np.log10(pThr)
+    # If the preferred p-value threshold is higher than maxLine, extend maxLine
+    if threshold_line > maxLine:
+        maxLine = threshold_line + offset
     for i, row in pepClusters.iterrows():
+        xpos = int(row['_xpos'])
+        cluster_val = row[cluster_col]
+        color = cluster_palette.get(cluster_val, '#d3d3d3')
         ax[1].add_patch(
             plt.Rectangle(
-                (row[peptide_col] - 0.5, minLine), 1, maxLine - minLine,
-                color=cluster_palette[row[cluster_col]],
-                alpha=0.5, linewidth=1.5, edgecolor="black",
-                zorder=1, 
+                (xpos - 0.5, minLine), 1, maxLine - minLine,
+                color=color,
+                alpha=0.5, linewidth=1.5, zorder=1, 
             )
         )
 
@@ -2409,11 +2513,22 @@ def detailed_peptide_with_clusters(
         bbox_to_anchor=(1.1, 0.5), 
     )
 
+    # Highlight perturbed peptides on middle plot (vertical line + star marker) if any
+    if perturbed_peptides:
+        for pep in ordered_peptides:
+            if pep in perturbed_peptides:
+                xpos = int(plot_data[plot_data[peptide_col] == pep]['_xpos'].iloc[0])
+                # vertical line across middle plot
+                ax[1].axvline(x=xpos, color='gold', linestyle='-', linewidth=1.5, alpha=0.9, zorder=5)
+                # star marker at top of middle plot for visibility
+                ytop = maxLine
+                ax[1].scatter([xpos], [ytop], marker='*', color='gold', s=200, edgecolor='black', zorder=6)
+
     # Third Plot shows the log10 intensity values
     sns.lineplot(
         ax=ax[2],
         data=plot_data,
-        x=peptide_col,
+    x='_xpos',
         y=rawIntensity_col,
         hue=condition_col,
         palette=condition_palette,
@@ -2423,6 +2538,11 @@ def detailed_peptide_with_clusters(
 
     ax[2].set_ylabel("Log10 Raw Intensity", fontsize=12)
     ax[2].set_xlabel(f"PeptideIDs in {cur_protein} (Ordered by Start Position)", fontsize=12)
+    # Set xticks to peptide labels (add '*' suffix for perturbed peptides)
+    xticks = plot_data['_xpos'].unique().tolist()
+    xticklabels = [str(p) + ('*' if (p in perturbed_peptides) else '') for p in ordered_peptides]
+    ax[2].set_xticks(xticks)
+    ax[2].set_xticklabels(xticklabels)
 
     for i in range(3):
         ax[i].grid("both", linestyle="--", linewidth=0.5, alpha=0.5, color="lightgrey")
@@ -2441,263 +2561,140 @@ def detailed_peptide_with_clusters(
 
     # Align y-axis labels
     fig.align_ylabels(ax)
-    plt.tight_layout()
 
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-        if dont_show:
-            plt.close(fig)
-    else:
-        if dont_show:
-            plt.close(fig)
-        else:
-            return fig
-
-def heatmap_with_clusters(
-        data: pd.DataFrame,
-        cur_protein: str,
-        pThr: float = 0.0001,
-        corrMethod: str = 'kendall',
-        distanceMetric: str = 'euclidean',
-        linkageMethod: str = 'complete',
-        
-        ## Columns
-        hue_col: str = 'TumorRegulation',
-        pvalue_col: str = 'adj.pvalue',
-        cluster_col: str = 'cluster_id',
-        protein_col: str = 'Protein',
-        peptideid_col: str = 'PeptideID',
-        intensity_col: str = 'Intensity',
-        sample_col: str = 'Sample',
-
-        ## Palette    
-        hue_palette: dict = None, 
-        cluster_palette: dict = None, 
-
-        ## Fi
-        figsize: tuple = (4, 4),
-        vmin: float = -.85,
-        vmax: float = .85,
-        main_cmap: str = "coolwarm",
-
-        save: bool = False, 
-        filename: Optional[str] = None, 
-        filepath: Optional[str] = None, 
-        fileformats: List[str] = ['png'], 
-        dpi: int = 300, 
-        transparent: bool = False, 
-        dont_show: bool = False
-
-    ):
-    """
-        
-    """
-    # Set the plot data
-    plot_data = data[data[protein_col] == cur_protein].copy()
-    plot_data['isSignificant'] = plot_data[pvalue_col] <= pThr
-    plot_data['-log10(adj.pvalue)'] = -np.log10(plot_data[pvalue_col])
-    # Setup the annotation data to be used
-    corr_annot = plot_data[[
-        peptideid_col, '-log10(adj.pvalue)', 'isSignificant',
-        hue_col, cluster_col
-    ]].drop_duplicates().set_index(peptideid_col)
-    corr_annot["Annot"] = corr_annot.index
-    corr_annot.loc[corr_annot["isSignificant"] == 0, "Annot"] = np.nan
-    # Setup the correlation matrix 
-    corr_matrix = (
-        1 - plot_data.pivot(
-            index=peptideid_col,
-            columns=sample_col,
-            values=intensity_col
-        )
-    ).T.corr(method=corrMethod).stack()
-    corr_matrix.index.names = ["level_0", "level_1"]
-    corr_matrix = corr_matrix.reset_index(name="Correlation")
-
-    if cluster_palette is None:
-        colors = sns.color_palette(
-            "Set2", n_colors=len(plot_data[cluster_col].unique())
-        ).as_hex()
-        cluster_palette = dict(zip(plot_data[cluster_col].unique(), colors))
-
-    # Setup row annotations
-    row_ha = pch.HeatmapAnnotation(
-        Module=pch.anno_simple(
-            corr_annot[cluster_col], colors=cluster_palette, legend=False, height=5,
-            add_text=True, text_kws={'color':'black','fontsize':12}
-        ),
-        # ProteoformGroup=pch.anno_simple(
-        #     corr_annot["PFGroup"], colors=pfgPal, legend=False, height=5,
-        #     add_text=True, text_kws={'color':'black','fontsize':12}
-        # ),
-        Significant=pch.anno_simple(
-            corr_annot["isSignificant"], colors={True: '#540b0e', False: '#fff3b0'}, legend=True,
-        ),
-        Selected=pch.anno_label(
-            corr_annot["Annot"], height=5, fontsize=12, colors='#540b0e'
-        ),
-        axis=0,verbose=0,label_kws={'visible':False}
-    )
-    # Setup column annotations
-    col_ha = pch.HeatmapAnnotation(
-        Cluster=pch.anno_simple(
-            corr_annot[cluster_col], colors=cluster_palette, height=5, legend=False,
-            add_text=True, text_kws={'color':'black','fontsize':12}
-        ),
-        # AdjPvalue=pch.anno_barplot(
-        #     corr_annot["-log10(adj.pvalue)"], cmap='Greys',
-        #     #
-        # ),
-        TumorRegulation=pch.anno_simple(
-            corr_annot[hue_col], colors=hue_palette,
-        ),
-        verbose=0, label_side='right', label_kws={'horizontalalignment':'left'}
+    finalize_plot( 
+        fig, show, save, filename,
+        # Arguments
+        filepath=filepath,
+        formats=fileformats,
+        transparent=transparent,
+        dpi=dpi
     )
 
-    # Find the peptides for the protein
-    nPeps = plot_data[peptideid_col].nunique()
-    figsize = (figsize[0]+(nPeps/10), figsize[1]+(nPeps/10))
+    # return fig
 
-    # Initialize the figure
-    fig, ax = plt.subplots(figsize=figsize)
-    if np.any(corr_annot[cluster_col].value_counts() == 1):
-        # Not using splitting of the clusters
-        cm = pch.DotClustermapPlotter(
-            data=corr_matrix, x='level_0',y='level_1',
-            value='Correlation', c='Correlation',
-            top_annotation=col_ha, right_annotation=row_ha,
-            row_dendrogram=True, col_dendrogram=True,
-            row_cluster_metric=distanceMetric, row_cluster_method=linkageMethod,
-            col_cluster_metric=distanceMetric, col_cluster_method=linkageMethod,
-            cmap=main_cmap, vmin=vmin, vmax=vmax,
-            legend_hpad=1, legend_vpad=1, legend_gap=5,
-            verbose=0, alpha=2, spines=False, tree_kws=dict(row_cmap='Set1',linewidth=0.5),
-        )
-    else:
-        cm = pch.DotClustermapPlotter(
-            data=corr_matrix, x='level_0',y='level_1',
-            value='Correlation', c='Correlation',
-            top_annotation=col_ha, right_annotation=row_ha,
-            col_split=corr_annot[cluster_col], row_split=corr_annot[cluster_col], 
-            col_split_gap=1, row_split_gap=1,
-            row_dendrogram=True, 
-            row_cluster_metric=distanceMetric, row_cluster_method=linkageMethod,
-            col_cluster_metric=distanceMetric, col_cluster_method=linkageMethod,
-            cmap=main_cmap, vmin=vmin, vmax=vmax,
-            legend_hpad=1, legend_vpad=1, legend_gap=5,
-            verbose=0, alpha=2, spines=False, tree_kws=dict(row_cmap='Set1',linewidth=0.5),
-        )
-        # plot custom spines
-        for i in range(cm.heatmap_axes.shape[0]):
-            for j in range(cm.heatmap_axes.shape[1]):
-                if i != j:
-                    continue
-                ax = cm.heatmap_axes[i][j]
-                for side in ["top", "right", "left", "bottom"]:
-                    ax.spines[side].set_visible(True)
-                    ax.spines[side].set_color('black')
-                    ax.spines[side].set_linewidth(2)
-                    ax.spines[side].set_zorder(10)
+# ======================================================================================
+# ProteoForge - Clustering 
+# ======================================================================================
 
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-        if dont_show:
-            plt.close(fig)
-    else:
-        if dont_show:
-            plt.close(fig)
-        else:
-            return fig
-        
-def donut_chart(
-        data: list,
-        labels: list,
-        colors: list,
-        figsize: tuple = (6, 6),
-        startangle: int = 90,
-        text_color: str = "k",
-        text_fontsize: int = 15,
-        autotext_fontsize: int = 12,
-        autotext_color: str = 'black',
-        autotext_weight: str = 'bold',
-        circle_radius: float = 0.70,
-        circle_color: str = 'white',
-        # label_as_legend: bool = True,
-        ## Saving options
-        save: bool = False, 
-        filename: Optional[str] = "donut_chart", 
-        filepath: Optional[str] = None, 
-        fileformats: List[str] = ['png'], 
-        dpi: int = 300, 
-        transparent: bool = False, 
-        dont_show: bool = False
-
-    ):
-    """
-        Create a donut chart with the given data and parameters.
-
-        Args:
-    """
-
-    fig, ax = plt.subplots(figsize=figsize)
+def clustering_check_with_single_heatmap(
+    corr_matrix, 
+    labels, 
+    protein_id,
+    ax=None,
+    base_size=1,
+    min_size=6,
+    max_size=20,
+    cmap="RdBu_r",
+    show_annotations=False,
+    linewidth=3,
+    boundary_color="black",
+    custom_title=None,
+    show_cluster_bars=True,
+    cluster_bar_width=0.3, 
+    vmin=-1,
+    vmax=1,
+):
+    if not labels.size:
+        print("No clustering results to visualize")
+        return None
     
-    # Function to format the autopct
-    def func(pct, allvals):
-        absolute = int(pct/100.*np.sum(allvals))
-        return "{:.1f}%\n({:d})".format(pct, absolute)
+    if corr_matrix is None or corr_matrix.empty:
+        print("No valid correlation matrix for visualization")
+        return None
     
-    # Plot
-    wedges, texts, autotexts = ax.pie(
-        data, labels=labels, colors=colors, autopct=lambda pct: func(pct, data), startangle=startangle, 
-        textprops=dict(color=text_color)
+    if ax is None:
+        n_peptides = len(labels)
+        fig_size = max(min_size, min(max_size, n_peptides * base_size))
+        fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+    
+    sorted_idx = np.argsort(labels)
+    sorted_labels = labels[sorted_idx]
+    sorted_corr = corr_matrix.iloc[sorted_idx, sorted_idx]
+    
+    # Create main heatmap
+    sns.heatmap(
+        sorted_corr.fillna(0),
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        square=True,
+        linewidths=0.5,
+        cbar_kws={"shrink": 0.75},
+        annot=show_annotations,
+        fmt=".2f" if show_annotations else None,
+        ax=ax,
     )
-
-    # Draw a circle at the center of pie to make it look like a donut
-    centre_circle = plt.Circle((0, 0), circle_radius, fc=circle_color)
-    fig.gca().add_artist(centre_circle)
     
-    # Adjust text sizes
-    for text in texts:
-        text.set_fontsize(text_fontsize)
-    for autotext in autotexts:
-        autotext.set_fontsize(autotext_fontsize)
-        autotext.set_color(autotext_color)
-        autotext.set_fontweight(autotext_weight)
+    # Add cluster indicator bars if requested
+    if show_cluster_bars:
+        n_clusters = len(np.unique(labels))
+        n_peptides = len(labels)
+        
+        # Generate distinct colors for clusters
+        cluster_colors = plt.cm.Set3(np.linspace(0, 1, n_clusters))
+        label_to_color = {label: cluster_colors[i] for i, label in enumerate(np.unique(sorted_labels))}
+        
+        # Create color arrays for the cluster bars
+        cluster_color_array = np.array([label_to_color[label] for label in sorted_labels])
+        
+        # Add horizontal cluster bar (top)
+        for i, color in enumerate(cluster_color_array):
+            ax.add_patch(plt.Rectangle((i, n_peptides + 0.05), 1, cluster_bar_width, 
+                                     facecolor=color, edgecolor='white', linewidth=0.5))
+        
+        # Add vertical cluster bar (right) - fix alignment with y-axis
+        for i, color in enumerate(cluster_color_array):
+            ax.add_patch(plt.Rectangle((n_peptides + 0.05, i), cluster_bar_width, 1, 
+                                     facecolor=color, edgecolor='white', linewidth=0.5))
+        
+        # Add cluster labels in the bars
+        group_changes = np.concatenate([[0], np.where(np.diff(sorted_labels) != 0)[0] + 1, [n_peptides]])
+        for i in range(len(group_changes) - 1):
+            start_idx = group_changes[i]
+            end_idx = group_changes[i + 1]
+            mid_idx = (start_idx + end_idx) / 2
+            cluster_label = sorted_labels[start_idx]
+            
+            # Label on top bar
+            ax.text(mid_idx, n_peptides + 0.05 + cluster_bar_width/2, f'C{cluster_label}', 
+                   ha='center', va='center', fontsize=8, fontweight='bold', color='black')
+            
+            # Label on right bar - fix alignment with y-axis
+            ax.text(n_peptides + 0.05 + cluster_bar_width/2, mid_idx, f'C{cluster_label}', 
+                   ha='center', va='center', fontsize=8, fontweight='bold', color='black', rotation=90)
     
-    # Equal aspect ratio ensures that pie is drawn as a circle.
-    ax.axis('equal')  
-    plt.tight_layout()
-
-    # Save the figure
-    if save:
-        save_figures(
-            fig,
-            filename=filename,
-            filepath=filepath,
-            fileformat=fileformats,
-            dpi=dpi,
-            transparent=transparent
-        )
-        if dont_show:
-            plt.close(fig)
+    # Draw boundary lines between clusters
+    group_changes = np.where(np.diff(sorted_labels) != 0)[0] + 1
+    for change in group_changes:
+        ax.axhline(y=change, color=boundary_color, linewidth=linewidth)
+        ax.axvline(x=change, color=boundary_color, linewidth=linewidth)
+    
+    # Set title
+    n_clusters = len(np.unique(labels))
+    n_peptides = len(labels)
+    if custom_title is not None:
+        ax.set_title(custom_title, fontweight="bold")
     else:
-        if dont_show:
-            plt.close(fig)
-        else:
-            return fig
+        ax.set_title(
+            f"Proteoform Clustering - {protein_id}\n"
+            f"{n_peptides} peptides, {n_clusters} clusters", 
+            fontweight="bold"
+        )
+    
+    # Adjust axis limits to accommodate cluster bars
+    if show_cluster_bars:
+        ax.set_xlim(0, n_peptides + cluster_bar_width + 0.1)
+        ax.set_ylim(0, n_peptides + cluster_bar_width + 0.1)
+    
+    return ax
+
+# ======================================================================================
+# ProteoForge - Summarization 
+# ======================================================================================
+
+
+
+# ======================================================================================
+# ProteoForge - Protein Annotations 
+# ======================================================================================

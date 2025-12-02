@@ -1,70 +1,25 @@
 import re
 import time
-from tqdm import tqdm
+from collections import Counter
+from itertools import combinations
+from typing import Any, Callable, Dict, List, Union
 
 import numpy as np
 import pandas as pd
-
-from sklearn.linear_model import LinearRegression
-from sklearn.experimental import enable_iterative_imputer
-from sklearn.impute import KNNImputer, IterativeImputer
 from sklearn.metrics import matthews_corrcoef
-from sknetwork.hierarchy import cut_balanced
+from sklearn.preprocessing import minmax_scale
 
-from dynamicTreeCut import cutreeHybrid
-from scipy.spatial.distance import pdist
-from scipy.cluster.hierarchy import linkage
+# ======================================================================================
+# Global Variables and Settings
+# ======================================================================================
+# TODO list:
+# - Move the styling defaults to here
+# - 
 
-from Bio import SeqIO
-from Bio.SeqUtils import molecular_weight
 
-##################### Global Variable Utilized #####################
-# TODO: Add the global variables as needed
-# Cell
-uniprot_feature_dict = {
-    'CHAIN': 'Chain',
-    'INIT_MET': 'Initiator methionine',
-    'PEPTIDE': 'Peptide',
-    'PROPEP': 'Propeptide',
-    'SIGNAL': 'Signal peptide',
-    'TRANSIT': 'Transit peptide',
-    'CROSSLNK': 'Cross-link',
-    'DISULFID': 'Disulfide bond',
-    'CARBOHYD': 'Glycosylation',
-    'LIPID': 'Lipidation',
-    'MOD_RES': 'Modified residue',
-    'COILED': 'Coiled coil',
-    'COMPBIAS': 'Compositional bias',
-    'DOMAIN': 'Domain',
-    'MOTIF': 'Motif',
-    'REGION': 'Region',
-    'REPEAT': 'Repeat',
-    'ZN_FING': 'Zinc finger',
-    'INTRAMEM': 'Intramembrane',
-    'TOPO_DOM': 'Topological domain',
-    'TRANSMEM': 'Transmembrane',
-    'STRAND': 'Beta strand',
-    'HELIX': 'Helix',
-    'TURN': 'Turn',
-    'ACT_SITE': 'Active site',
-    'BINDING': 'Binding site',
-    'CA_BIND': 'Calcium binding',
-    'DNA_BIND': 'DNA binding',
-    'METAL': 'Metal binding',
-    'NP_BIND': 'Nucleotide binding',
-    'SITE': 'Site',
-    'NON_STD': 'Non-standard residue',
-    'NON_CONS': 'Non-adjacent residues',
-    'NON_TER': 'Non-terminal residue',
-    'VARIANT': 'Natural variant',
-    'CONFLICT': 'Sequence conflict',
-    'VAR_SEQ': 'Alternative sequence',
-    'UNSURE': 'Sequence uncertainty',
-    'STRUCTURE': 'Secondary structure',
-    'MUTAGEN': 'Mutagenesis'
-}
-
-#################### Notebook Utility functions ####################
+# ======================================================================================
+# Notebook Utility Functions
+# ======================================================================================
 
 def getTime() -> float:
     """
@@ -240,707 +195,15 @@ def print_list(
         f"{description} {data[:n_elements]}...{data[-n_elements:]}"
     )
 
-#################### Fasta file parsing functions ####################
-
-def getMW(
-        seq: str, 
-        kDa: bool = True
-    ) -> float:
-    """
-        Get the molecular weight of a protein sequence.
-
-        Args:
-            seq (str): Amino acid sequence.
-            kDa (bool, optional): If True, the molecular weight is returned in kDa. Defaults to True.
-
-        Returns:
-            float: The molecular weight of the sequence in kDa if kDa is True, else in Da.
-                If the sequence contains invalid amino acids, np.nan is returned.
-
-        Examples:
-            >>> getMW("ACDEFGHIKLMNPQRSTVWY")
-            2.3
-
-            >>> getMW("ACDEFGHIKLMNPQRSTVWYX")
-            np.nan
-
-            >>> getMW("ACDEFGHIKLMNPQRSTVWYB")
-            np.nan
-
-    """
-    multiplier = 1
-    if kDa: multiplier = 1000
-
-    try: 
-        return molecular_weight(seq, "protein") / multiplier
-    except ValueError:
-        # error thrown, for example, when dealing w/ X amino acid
-        return np.nan
-    
-def remove_sequences_with_invalid_AA(
-        seq: str
-    ) -> str:
-    """
-        Remove sequences with invalid amino acids.
-
-        Args:
-            seq (str): Amino acid sequence.
-
-        Returns:
-            str: The amino acid sequence if it contains no invalid amino acids, else np.nan.
-        
-        Examples:
-            >>> remove_sequences_with_invalid_AA("ACDEFGHIKLMNPQRSTVWY")
-            "ACDEFGHIKLMNPQRSTVWY"
-
-            >>> remove_sequences_with_invalid_AA("ACDEFGHIKLMNPQRSTVWYX")
-            np.nan
-
-            >>> remove_sequences_with_invalid_AA("ACDEFGHIKLMNPQRSTVWYB")
-            np.nan
-    """
-    # Invalid characters are: X, B, Z, J, U, O, *
-    if re.search("[X|B|Z|J|U|O|\*]", seq):
-        return np.nan
-    else:
-        return seq
-
-def check_length(
-        seq: str,
-        minL: int = 7,
-        maxL: int = 50 
-    ) -> bool:
-    """
-        Check if a peptide/protein sequence is within a specified length range.
-
-        Args:
-            seq (str): A peptide or protein sequence.
-            minL (int, optional): The minimum length of the sequence. Defaults to 7.
-            maxL (int, optional): The maximum length of the sequence. Defaults to 50.
-                For proteins should be set to 10**6 to avoid any length restrictions.
-
-        Returns:
-            bool: True if the peptide sequence is within the length range, else False.
-
-        Examples:
-            >>> check_length("ACDEFGHIKLMNPQRSTVWY", minL=7, maxL=50)
-            True
-            
-            >>> check_length("x"*51, maxL=50)
-            False
-
-            >>> check_length("x"*6, minL=7)
-            False
-
-            >>> check_length("x"*51, minL=7, maxL=10**6)
-            True
-    """
-    return len(seq) >= minL and len(seq) <= maxL
-
-def parse_proteome_header(
-        header: str
-    ) -> dict:
-    """
-        Parse a Uniprot fasta proteome header and return a dictionary of informative variables.
-
-        Args:
-            header (str): Uniprot fasta proteome header string.
-
-        Returns:
-            dict: A dictionary of informative variables.
-
-        Examples:
-            >>> parse_proteome_header("sp|Q9Y5Y9|1433B_HUMAN 14-3-3 protein beta GN= YWHAB PE=1 SV=2")
-            {'reviewStatus': 'sp', 'entry': 'Q9Y5Y9', 'entryName': '1433B_HUMAN', 
-            'geneName': 'YWHAB', 'proteinDescription': '14-3-3 protein beta'}
-
-    """
-    # Define regular expressions for each field we want to extract
-    regexes = {
-        "reviewStatus": r"^(sp|tr)\|([A-Z0-9]+)\|",
-        "entry": r"^.*?\|([A-Z0-9-]+)\|",
-        "entryName": r"^.*?\|([A-Z0-9]+)_([A-Z]+)",
-        "geneName": r" GN=([^ ]+)",
-        "proteinDescription": r" ([^=]+)(?<! [A-Z]{2}=)",
-    }
-
-    # Extract the information using regular expressions
-    variables = {}
-    for key, regex in regexes.items():
-        match = re.search(regex, header)
-        if match:
-            if key == "entryName":
-                variables[key] = f"{match.group(1)}_{match.group(2)}" if match.group(2) else match.group(1)
-            else:
-                variables[key] = match.group(1) if key == "proteinDescription" else match.group(1)
-                if key == "proteinDescription":
-                    variables[key] = variables[key].strip(" OS")
-
-    return variables
-
-# Function to read and parse the fasta file into a dataframe
-def fasta_to_df(
-        reference_path: str, 
-        fasta_ID: str = None,
-        geneOnly: bool = False, 
-        seqLenMin: int = 7, 
-        seqLenMax: int = 10**6,
-        col_order: list = [
-            "fastaId", "entry", "entryName", 
-            "geneName", "proteinDescription",
-            "reviewStatus", "isoformStatus", 
-            "sequenceLength", "molecularWeight_kDa", 
-            "sequence"
-        ],
-        sort_by: list = ["entry", "isoformStatus"],
-        sort_order: list = [True, False]
-    ) -> pd.DataFrame:
-    """
-        Read and parse the Uniprot fasta proteome file into a dataframe.
-        
-        Args:
-            reference_path (str): The path to the Uniprot fasta proteome file.
-            fasta_ID (str, optional): The ID of the fasta file. Defaults to None.
-            geneOnly (bool, optional): If True, only sequences with gene names are included. Defaults to False.
-            seqLenMin (int, optional): The minimum length of the sequence. Defaults to 7.
-            seqLenMax (int, optional): The maximum length of the sequence. Defaults to 10**6.
-            col_order (list, optional): The order of the columns in the dataframe. Defaults to None.
-            sort_by (list, optional): The columns to sort the dataframe by. Defaults to ["entry", "isoformStatus"].
-            sort_order (list, optional): The order to sort the dataframe by. Defaults to [True, False].
-
-        Returns:
-            pd.DataFrame: A dataframe containing the parsed information from the fasta file.
-
-        Examples:
-            >>> fasta_to_df("data/uniprot-proteome_UP000005640.fasta")
-
-            >>> fasta_to_df("data/uniprot-proteome_UP000005640.fasta", "UP000005640")
-
-            >>> fasta_to_df("data/uniprot-proteome_UP000005640.fasta", "UP000005640", geneOnly=True)
-
-            >>> fasta_to_df("data/uniprot-proteome_UP000005640.fasta", "UP000005640", 
-            geneOnly=True, seqLenMin=7, seqLenMax=10**6)
-    """
-
-    # Initialize a list to hold all the entries
-    results = []
-    for record in SeqIO.parse(reference_path, "fasta"):
-        # Remove sequences with invalid amino acids
-        cur_seq = remove_sequences_with_invalid_AA(str(record.seq))
-        if cur_seq is np.nan: continue # Skip sequences if with invalid amino acids
-        # Skip sequences with length less than 7 or more than 50K
-        if not check_length(cur_seq, seqLenMin, seqLenMax): continue
-        # Parse the header
-        cur_dict = parse_proteome_header(record.description)
-        # Skip sequence if gene name is not available 
-        if geneOnly and "geneName" not in cur_dict: continue
-        # Get the sequence
-        cur_dict["sequence"] = cur_seq
-        # Add the sequence length
-        cur_dict["sequenceLength"] = len(cur_seq)
-        # Add molecular weight
-        cur_dict["molecularWeight_kDa"] = getMW(cur_seq)
-        # Add the entry to the list
-        results.append(cur_dict)
-
-    # Convert the list to a dataframe
-    df = pd.DataFrame(results)
-    # Add the fasta ID
-    if fasta_ID is not None: df["fastaId"] = fasta_ID
-    # Update the review status
-    df["reviewStatus"] = df["reviewStatus"].apply(lambda x: "reviewed" if x == "sp" else "unreviewed") 
-    # Update the isoform status
-    # If the entry name contains a dash, it is an isoform
-    df["isoformStatus"] = df["entry"].apply(lambda x: "isoform" if "-" in x else "canonical")
-    # This is not perfect, but it is the best we can do with the information we have 
-    # Order the columns
-    if col_order is not None:
-        if not set(col_order).issubset(df.columns):
-            raise ValueError("The col_order list must contain all the columns in the dataframe.")
-        df = df[col_order]
-    # Sort the dataframe
-    if sort_by is not None:
-        if not set(sort_by).issubset(df.columns):
-            raise ValueError("The sort_by list must contain all the columns in the dataframe.")
-        df = df.sort_values(by=sort_by, ascending=sort_order)
-    # Return the dataframe
-    return df.reset_index(drop=True)
-
-#################### Peptide Info Expansion functions ####################
-
-def select_representative_protein(
-        proteins: str
-    ) -> str:
-    """
-        Selects a representative protein from a group
-
-        The function takes a string of protein IDs separated by semicolons. 
-        If there's only one ID, it is returned. If there are multiple IDs, 
-        the function prioritizes 6-letter IDs over 10-letter ones. If no 6-letter 
-        IDs are present, the first ID is returned.
-
-        Args:
-            proteins (str): A string of protein IDs separated by semicolons.
-
-        Returns:
-            str: The ID of the representative protein.
-
-        Examples:
-            >>> select_representative_protein("P12345")
-            'P12345'
-
-            >>> select_representative_protein("A0A075B6K5;Q12345")
-            'Q12345'
-
-            >>> select_representative_protein("P12345;A0A075B6K5;P1234")
-            'P12345'
-    """
-    protein_ids = proteins.split(";")
-    
-    if len(protein_ids) == 1:
-        return protein_ids[0]
-    
-    six_letter_ids = [id for id in protein_ids if len(id) == 6]
-    
-    return six_letter_ids[0] if six_letter_ids else protein_ids[0]
-
-# Utility function that uses the dictionary from trace builder function into a dataframe
-def dict_to_protein_peptide_df(
-        data_dict: dict
-    ) -> pd.DataFrame:
-    """
-        Converts a nested dictionary of protein-peptide counts into a Pandas DataFrame with a single 'Trace' column.
-
-        Args:
-            data_dict: A dictionary where keys are protein IDs and values are dictionaries of peptide counts.
-
-        Returns:
-            pd.DataFrame: A DataFrame with 'Protein', 'Peptide', and 'Trace' columns.
-    """
-    # Initialize a list to hold the rows
-    rows = []
-    # Iterate over the dictionary
-    for protein, peptide_counts in data_dict.items():
-        for peptide, count in peptide_counts.items():
-            row = {'Protein': protein, 'Peptide': peptide, 'Trace': count}
-            rows.append(row)
-
-    return pd.DataFrame(rows)
-
-# TODO: Add the Protein Coverage and Peptide Tracer functions
-
-# TODO: Function to expand the peptide information (match positions, etc.)
-
-# Function to find overlapping peptides
-def group_miss_cleaved_peptides(
-        startpos_arr: list,
-        endpos_arr: list, 
-        max_diff: int = 3
-    ) -> dict:
-    """
-        Group overlapping peptides based on their start and end positions 
-            with a maximum allowed difference.
-
-        Args:
-            startpos_arr (list): List of peptide start positions.
-            endpos_arr (list): List of peptide end positions.
-            max_diff (int, optional): The maximum allowed difference between 
-                peptide start and end positions. Defaults to 3.
-
-        Returns:
-            dict: A dictionary where keys are the indices of the 
-                longest peptides and values are lists of overlapping peptide indices.
-    """
-
-    overlapping_peptides = {}
-    n = len(startpos_arr)
-    used_indices = set()
-    
-    for i in range(n):
-        if i in used_indices:
-            continue
-        
-        longest_peptide_index = i
-        longest_peptide_length = endpos_arr[i] - startpos_arr[i]
-        overlapping_indices = [i]
-        
-        for j in range(n):
-            if i != j and j not in used_indices:
-                start1, end1 = startpos_arr[i], endpos_arr[i]
-                start2, end2 = startpos_arr[j], endpos_arr[j]
-                
-                # Check if peptides overlap within the allowed difference
-                if (abs(start1 - start2) <= max_diff and abs(end1 - end2) <= max_diff):
-                    overlapping_indices.append(j)
-                    used_indices.add(j)
-                    
-                    # Update the longest peptide index if necessary
-                    current_peptide_length = endpos_arr[j] - startpos_arr[j]
-                    if current_peptide_length > longest_peptide_length:
-                        longest_peptide_index = j
-                        longest_peptide_length = current_peptide_length
-        
-        if len(overlapping_indices) > 1:
-            overlapping_peptides[longest_peptide_index] = overlapping_indices
-            used_indices.update(overlapping_indices)
-        else:
-            overlapping_peptides[i] = []
-
-    # Add non-grouped peptides with empty lists
-    for i in range(n):
-        if i not in overlapping_peptides and i not in used_indices:
-            overlapping_peptides[i] = []
-    
-    return overlapping_peptides
-
-################### Uniprot Annotation Functions ###################
-# Source: Alphamap/alphamap/uniprot_integration.py
-# Main and helper functions used as is without any modifications
-# TODO: Optimize the main function 
-
-def extract_note(
-        string: str, splitted:bool = False
-    ) -> str:
-    """
-        Helper function to extract information about note of the 
-            protein from Uniprot using regular expression.
-
-        Args:
-            string (str): Uniprot annotation string.
-            splitted (bool, optional): Flag to allow linebreaks. 
-                Default is 'False'.
-        Returns:
-            str: Extracted string of the uniprot note section.
-    """
-    if not splitted:
-        regex = r"\/note=\"(?P<note>.+?)\""
-    else:
-        regex = r"\/note=\"(?P<note>.*)"
-    result = re.findall(regex, string)
-    return result
-
-def extract_note_end(
-        string: str, has_mark:bool = True
-    ) -> str:
-    """
-        Helper function to extract information about note of the 
-            protein from Uniprot using regular expression.
-
-        Args:
-            string (str): Uniprot annotation string.
-            has_mark (bool, optional): Flag if end quotation marks are present. 
-                Default is 'False'.
-        Returns:
-            str: Extracted string of the uniprot note section.
-    """
-    if has_mark:
-        regex = r"FT\s+(?P<note>.*)\""
-    else:
-        regex = r"FT\s+(?P<note>.*)"
-    result = re.findall(regex, string)
-    return result
-
-# Cell
-def resolve_unclear_position(
-        value: str
-    ) -> float:
-    """
-        Replace unclear position of the start/end of the modification 
-            defined as '?' with -1 and if it's defined as '?N'
-            or ">N" - by removing the '?'/'>'/'<' signs.
-
-        Args:
-            value (str): Unclear sequence position from uniprot.
-        Returns:
-            float: Resolved sequence position.
-    """
-    # if it's "1..?" or "?..345" for start or end -> remove -1 that we can filter later
-    # if it's "31..?327" or "?31..327" -> remove the question mark
-    # if it's "<1..106" or "22..>115" -> remove the "<" or ">" signs
-    if value == '?': return -1
-    value = value.replace('?', '').replace('>', '').replace('<', '')
-    return float(value)
-
-def extract_positions(
-        posit_string: str
-    ):
-    """
-        Extract isoform_id(str) and start/end positions(float) of 
-            any feature key from the string.
-
-        Args:
-            posit_string (str): Uniprot position string.
-        Returns:
-            [str, float, float]: 
-                str: Uniprot isoform accession, 
-                float: start position, 
-                float: end position
-    """
-    isoform = ''
-    start = end = np.nan
-    if '..' in posit_string:
-        start, end = posit_string.split('..')
-    if ':' in posit_string:
-        if isinstance(start, str):
-            isoform, start = start.split(':')
-        else:
-            isoform, start = posit_string.split(':')
-    # in the case when we have only one numeric value as a posit_string
-    if isinstance(start, float):
-        start = posit_string
-    # change the type of start and end into int/float(np.nan)
-    if isinstance(start, str):
-        start = resolve_unclear_position(start)
-    if isinstance(end, str):
-        end = resolve_unclear_position(end)
-    return isoform, start, end
-
-def preprocess_uniprot(
-        path_to_file: str
-    ) -> pd.DataFrame:
-    """
-        A complex complete function to preprocess Uniprot data from 
-        specifying the path to a flat text file to the returning a 
-        dataframe containing information about:
-            - protein_id(str)
-            - feature(category)
-            - isoform_id(str)
-            - start(float)
-            - end(float)
-            - note information(str)
-
-        Args:
-            path_to_file (str): Path to a .txt annotation file 
-                directly downloaded from uniprot.
-        Returns:
-            pd.DataFrame: Dataframe with formatted uniprot annotations
-
-    """
-    all_data = []
-    with open(path_to_file) as f:
-
-        is_splitted = False
-        new_instance = False
-        combined_note = []
-        line_type = ''
-
-        for line in f:
-            if line.startswith(('AC', 'FT')):
-                if is_splitted:
-                    # in case when the note information is splitted into several lines
-                    if line.rstrip().endswith('"'):
-                        # if it's the final part of the note
-                        combined_note.extend(extract_note_end(line))
-                        all_data.append([protein_id, feature, isoform, start, end, " ".join(combined_note)])
-                        is_splitted = False
-                        new_instance = False
-                    else:
-                        # if it's the middle part of the note
-                        combined_note.extend(extract_note_end(line, has_mark=False))
-                elif line.startswith('AC'):
-                    # contains the protein_id information
-                    if line_type != 'AC':
-                        # to prevent a situation when the protein has several AC lines with different names
-                        # in this case we are taking the first name in the first line
-                        protein_id = line.split()[1].replace(';', '')
-                    line_type = 'AC'
-                elif line.startswith('FT'):
-                    line_type = 'FT'
-                    # contains all modifications/preprocessing events/etc., their positions, notes
-                    data = line.split()
-                    if data[1].isupper() and not data[1].startswith('ECO'):
-                            feature = data[1]
-                            isoform, start, end = extract_positions(data[2])
-                            new_instance = True
-                    else:
-                        if data[1].startswith('/note'):
-                            note = extract_note(line)
-                            if note:
-                                # if note was created > it contains just one line and can be already added to the data
-                                all_data.append([protein_id, feature, isoform, start, end, note[0]])
-                                new_instance = False
-                            else:
-                                # if note is empty > it's splitted into several lines and we create combined_note
-                                combined_note = extract_note(line, splitted=True)
-                                is_splitted = True
-                        else:
-                            if new_instance:
-                                # in case when we don't have any note but need to add other information about instance
-                                all_data.append([protein_id, feature, isoform, start, end, ''])
-                                new_instance = False
-
-    # create a dataframe for preprocessed data
-    uniprot_df = pd.DataFrame(all_data, columns=['protein_id', 'feature', 'isoform_id', 'start', 'end', 'note'])
-    # change the dtypes of the columns
-    uniprot_df.feature = uniprot_df.feature.astype('category')
-    # to filter the instances that don't have a defined start/end position(start=-1 or end=-1)
-    uniprot_df = uniprot_df[(uniprot_df.start != -1) & (uniprot_df.end != -1)].reset_index(drop=True)
-
-    return uniprot_df
-
-#################### Sequence parsing functions ####################
-
-def build_plot_dict(
-        protein: str,                   # Protein Name
-        quan_data: pd.DataFrame,        # Quantification in the form of results_df in long-format
-        info_data: pd.DataFrame,        # Expanded Info Data where compressed info
-        uniprot_data: pd.DataFrame,     # Uniprot Annotation Data
-        condition_pal: dict,            # Condition: Color dictionary
-        cluster_pal: dict,              # Cluster: Color dictionary
-        hue_pal: dict,                  # Hue: Color dictionary (must match the unique values in the hue_col)
-        
-        ## Additional Variables
-        hue_col: str = "TumorRegulation", # Column to use for hue in plots
-        pThr: float = 0.0001,           # Threshold for p-value to consider significant
-        corrMethod: str = "kendall",    # Correlation Method for heatmap [kendall, spearman, pearson] (should be same as used in ProteoForge)
-        distanceMethod: str = "euclidean", 
-        linkageMethod: str = "complete",
-
-        # Misc
-        verbose: bool = False
-    ):
-    """
-        A function to build a large dictionary with all data and related variables 
-            for a given protein for plotting and reporting a protein pdf summary. 
-        The function will return a dictionary with all the required data for plotting.
-
-        Args:
-            protein (str): The protein name to build the plot dictionary for.
-            quan_data (pd.DataFrame): The quantification data in long format.
-            info_data (pd.DataFrame): The expanded information data.
-            uniprot_data (pd.DataFrame): The uniprot annotation data.
-            condition_pal (dict): The condition color dictionary.
-            cluster_pal (dict): The cluster color dictionary.
-            hue_pal (dict): The hue color dictionary.
-            hue_col (str, optional): The column to use for hue in plots. Defaults to "TumorRegulation".
-            pThr (float, optional): The threshold for p-value to consider significant. Defaults to 0.0001.
-            corrMethod (str, optional): The correlation method for heatmap. Defaults to "kendall".
-            distanceMethod (str, optional): The distance method for clustering. Defaults to "euclidean".
-            linkageMethod (str, optional): The linkage method for clustering. Defaults to "complete".
-            verbose (bool, optional): Whether to print verbose output. Defaults to False.
-        
-        Returns:
-            dict: A dictionary with all the required data for plotting.
-                    
-    """
-    ## Global Variables
-    info_cols = [
-        "Protein", "Peptide", "PeptideID", "proteinDescription", "geneName",
-        "startpos", "endpos", "trace", "seqLength", "Cov%", "isCAP", hue_col, 
-        "cluster_id", "adj.pvalue", "isSignificant", "ProteoformGroup",
-    ]
-    quan_cols = [
-        "Protein", "Peptide", "Condition", "Sample",
-        "Intensity", "log10(Intensity)", "adjIntensity", 
-        "isReal", "isCompMiss", "Weight", 
-    ]
-    uniprot_cols = ["protein_id", "start", "end", "feature", "note"]
-
-    ## Validations
-    
-    assert all([
-        col in info_data.columns for col in info_cols
-    ]), "Missing required columns in info_data"
-    assert all([
-        col in quan_data.columns for col in quan_cols
-    ]), "Missing required columns in quan_data"
-    assert all([
-        col in uniprot_data.columns for col in uniprot_cols
-    ]), "Missing required columns in uniprot_data"
-    
-
-    ## Subset data
-    # Information Retrieval
-    cur_info = info_data[
-        info_data['Protein'] == protein
-    ]
-    # Annotation Retrieval
-    cur_annot = uniprot_data[
-        uniprot_data["protein_id"] == protein
-    ].sort_values(["start", "end"])
-    # Quantification Retrieval
-    cur_quan = quan_data.loc[
-        quan_data["Protein"] == protein,
-        quan_cols
-    ]
-    # Merge the information
-    plot_data = cur_quan.merge(
-        cur_info,
-        on=["Protein", "Peptide"],
-        how="left"
-    ) 
-    plot_data["-log10(adj.pvalue)"] = -np.log10(plot_data["adj.pvalue"])
-
-    ## Gather details
-    NumPeptides = cur_info.shape[0]
-    NumSignfPeptides = cur_info["isSignificant"].sum()
-    geneName = cur_info["geneName"].values[0]
-    proteinLength = cur_info["seqLength"].values[0]
-    proteinCov = cur_info["Cov%"].values[0]
-
-    ## Correlation details
-    # correlation annotation
-    corrAnnot = plot_data[[
-        # TODO: Add more columns for complexHeatmap Annotations
-        "PeptideID", '-log10(adj.pvalue)', 'isSignificant',
-        hue_col, 'cluster_id', "ProteoformGroup"
-    ]].drop_duplicates().set_index("PeptideID").rename(columns={
-        # '-log10(adj.pvalue)': "PValue",
-        'cluster_id': "Cluster",
-    })
-    corrAnnot["Annot"] = corrAnnot.index
-    corrAnnot.loc[corrAnnot["isSignificant"] == 0, "Annot"] = np.nan
-    corrAnnot['PFGroup'] = "PFG_" + corrAnnot['ProteoformGroup'].astype('category').cat.codes.astype(str)
-    # correlation data
-    corr_matrix = plot_data.pivot(
-        index="PeptideID",
-        columns="Sample",
-        values="Intensity"
-    )
-    distance_matrix = 1 - corr_matrix
-    corr_matrix = distance_matrix.T.corr(method=corrMethod).stack()
-    corr_matrix.index.names = ["level_0", "level_1"]
-    corr_matrix = corr_matrix.reset_index(name="Correlation")
-
-    tmp = cur_info[cur_info["isSignificant"]]
-    # Assemble Information
-    plot_dict = {
-        "Protein": protein,
-        "ProteinName": cur_info["proteinDescription"].unique()[0],
-        "Gene": geneName,
-        "pThr": pThr,
-        "Peptides": tmp["Peptide"].to_list(),
-        "p_values": tmp["adj.pvalue"].to_list(),
-        "PeptideIds": tmp["PeptideID"].to_list(),
-        "ProteinLength": proteinLength,
-        "ProteinCoverage": proteinCov,
-        "ConditionColors": condition_pal,
-        "HueColors": hue_pal,
-        "ClusterColors": cluster_pal,
-        # Cluster Information
-        "distanceMethod": distanceMethod,
-        "linkageMethod": linkageMethod,
-        # Various Tables
-        "ResultSubset": cur_info,
-        "UniprotAnnotData": cur_annot,
-        "PlotData": plot_data,
-        "CorrData": corr_matrix,
-        "CorrAnnot": corrAnnot,
-    }
-
-    if verbose:
-        print(f"{geneName} ({protein}) - {proteinLength:.0f} aa - {proteinCov:.2f}% Coverage")
-        print(f"# of Peptides (All/Sgnf): {NumPeptides}/{NumSignfPeptides}")
-
-    return plot_dict
-
-#################### Quantitative calculation functions ####################
+# ======================================================================================
+# Data Quality Check Functions
+# ======================================================================================
 
 def cv_numpy(
         x: np.ndarray, 
         axis: int = 1, 
         ddof: int = 1, 
-        ignore_nan: bool = False, 
+        ignore_nan: bool = True, 
         format: str = "percent"
     ) -> np.ndarray:
     """
@@ -994,15 +257,25 @@ def cv_numpy(
         raise TypeError("Input ddof must be an integer.")
 
     # If ignore_nan use np.nanstd and np.nanmean
+    # If input is scalar or empty, return np.nan
+    if np.size(x) <= 1:
+        return np.nan
     if ignore_nan:
-        cv = np.nanstd(x, axis=axis, ddof=ddof) / np.nanmean(x, axis=axis)
+        mean = np.nanmean(x, axis=axis)
+        std = np.nanstd(x, axis=axis, ddof=ddof)
     else:
-        cv = np.std(x, axis=axis, ddof=ddof) / np.mean(x, axis=axis)
-
+        mean = np.mean(x, axis=axis)
+        std = np.std(x, axis=axis, ddof=ddof)
+    # If mean is zero, return np.nan to avoid division by zero
+    if np.any(mean == 0):
+        return np.nan
+    cv = std / mean
     if format == "ratio":
         return cv
     elif format == "percent":
         return cv * 100
+    else:
+        return cv
 
 def scale_the_data(
         data: pd.DataFrame, 
@@ -1010,276 +283,490 @@ def scale_the_data(
         axis: int=1, 
         is_log: bool=False
     ):
+
     """
-        Function to scale the data using different methods across the rows or columns.
+    Scale a DataFrame using various methods along rows or columns.
 
-        Args:
-            data (pd.DataFrame): The data to be scaled.
-            method (str, optional): The scaling method. Defaults to "zscore".
-            axis (int, optional): The axis along which to scale the data. Defaults to 1.
-            is_log (bool, optional): If the data is log-transformed. Defaults to False.
+    Args:
+        data (pd.DataFrame): The data to be scaled.
+        method (str, optional): Scaling method. 
+            One of 'zscore', 'minmax', 'foldchange', 'log2', 'log10'. Defaults to 'zscore'.
+        axis (int, optional): Axis to scale along. 
+            0 = column-wise, 1 = row-wise. Defaults to 1.
+        is_log (bool, optional): If True, treat data as log-transformed for foldchange. 
+            Defaults to False.
+        verbose (bool, optional): If True, print debug info. 
+            Defaults to False.
 
-        Returns:
-            pd.DataFrame: The scaled data.
+    Returns:
+        pd.DataFrame: The scaled data.
 
-        Raises:
-            ValueError: If the data type is not supported.
-            ValueError: If the axis is not 0 or 1.
-            ValueError: If the method is not zscore, minmax, foldchange, log2, or log10.
+    Raises:
+        ValueError: If input is not a DataFrame, axis is not 0/1, or method is invalid.
 
-        Examples:
+    Examples:
+        >>> scale_the_data(df, method='zscore', axis=1)
+        >>> scale_the_data(df, method='minmax', axis=0)
+        >>> scale_the_data(df, method='foldchange', axis=1, is_log=True)
     """
 
-    # Check the data type
+
+    # --- Input validation ---
     if not isinstance(data, pd.DataFrame):
-        raise ValueError(
-            "The data type is not supported, please use either a pandas DataFrame"
-        )
-    
-    # Check the axis
-    if axis not in [0, 1]:
-        raise ValueError(
-            "The axis should be either 0 (column-wise) or 1 (row-wise)."
-        )
+        raise ValueError("Input must be a pandas DataFrame.")
+    if axis not in (0, 1):
+        raise ValueError("Axis must be 0 (columns) or 1 (rows).")
+    valid_methods = ["zscore", "minmax", "foldchange", "log2", "log10"]
+    if method not in valid_methods:
+        raise ValueError(f"Method must be one of {valid_methods}.")
 
-    # Check the method
-    if method not in ["zscore", "minmax", "foldchange", "log2", "log10"]:
-        raise ValueError(
-            "The method should be either zscore, minmax, foldchange, log2, or log10."
-        )
+    idx, cols = data.index, data.columns
+    # For debug/trace
+    verbose = False  # Set to True for debug output
 
-    idx = data.index
-    cols = data.columns
-
-    # Z-score Standardization
+    # --- Z-score Standardization ---
     if method == "zscore":
+        if verbose: print(f"Z-score scaling (axis={axis})")
         if axis == 0:
-            res = (
-                data.values - 
-                data.mean(axis=axis).values
-            ) / data.std(axis=axis).values
+            mean = data.mean(axis=axis)
+            std = data.std(axis=axis)
+            res = (data - mean) / std
         else:
-            res = (
-                data.values - 
-                data.mean(axis=axis).values.reshape(-1, 1)
-            ) / data.std(axis=axis).values.reshape(-1, 1)
-    # Min-Max scaling
+            mean = data.mean(axis=axis)
+            std = data.std(axis=axis)
+            res = (data.sub(mean, axis=0)).div(std, axis=0)
+        # Handle division by zero std
+        res = res.replace([np.inf, -np.inf], np.nan)
+
+    # --- Min-Max Scaling ---
     elif method == "minmax":
+        if verbose: print(f"Min-max scaling (axis={axis})")
         if axis == 0:
-            res = (
-                data.values - data.min(axis=axis).values
-            ) / (
-                data.max(axis=axis).values - 
-                data.min(axis=axis).values
-            )
+            min_ = data.min(axis=axis)
+            max_ = data.max(axis=axis)
+            denom = max_ - min_
+            denom[denom == 0] = np.nan
+            res = (data - min_) / denom
         else:
-            res = (
-                data.values - 
-                data.min(axis=axis).values.reshape(-1, 1)
-            ) / (
-                data.max(axis=axis).values.reshape(-1, 1) - 
-                data.min(axis=axis).values.reshape(-1, 1)
-            )
-    # Fold-change scaling
+            min_ = data.min(axis=axis)
+            max_ = data.max(axis=axis)
+            denom = max_ - min_
+            denom[denom == 0] = np.nan
+            res = data.sub(min_, axis=0).div(denom, axis=0)
+        res = res.replace([np.inf, -np.inf], np.nan)
+
+    # --- Fold-change Scaling ---
     elif method == "foldchange":
+        if verbose: print(f"Foldchange scaling (axis={axis}, is_log={is_log})")
+        mean = data.mean(axis=axis)
         if axis == 0:
             if is_log:
-                res = (
-                    data.values - data.mean(axis=axis).values
-                )
+                res = data - mean
             else:
-                res = (
-                    data.values / data.mean(axis=axis).values
-                )
+                mean[mean == 0] = np.nan
+                res = data / mean
         else:
             if is_log:
-                res = (
-                    data.values - 
-                    data.mean(axis=axis).values.reshape(-1, 1)
-                )
+                res = data.sub(mean, axis=0)
             else:
-                res = (
-                    data.values / 
-                    data.mean(axis=axis).values.reshape(-1, 1)
-                )
+                mean[mean == 0] = np.nan
+                res = data.div(mean, axis=0)
+        res = res.replace([np.inf, -np.inf], np.nan)
+
+    # --- Log2 Scaling ---
     elif method == "log2":
-        res = np.log2(data.values)
+        if verbose: print("Log2 scaling")
+        res = np.log2(data)
+
+    # --- Log10 Scaling ---
     elif method == "log10":
-        res = np.log10(data.values)
+        if verbose: print("Log10 scaling")
+        res = np.log10(data)
 
-    
-    return pd.DataFrame(
-        res, 
-        index=idx, 
-        columns=cols
-    )    
+    # --- Output ---
+    # Preserve dtypes if possible, always preserve index/columns
+    result = pd.DataFrame(res, index=idx, columns=cols)
+    if verbose:
+        print(f"Result shape: {result.shape}, dtypes: {result.dtypes.value_counts().to_dict()}")
+    return result
 
-def knn_imputation(
-        data: pd.DataFrame,
-        n_neighbors: int = 5
+def get_quantification_stats(df: pd.DataFrame, conditions: list[str]) -> pd.DataFrame:
+    """
+    Calculates the count and percentage of quantified (non-NA) values per row for specified conditions.
+
+    This function is useful for assessing data completeness across different experimental groups.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing measurement columns.
+        conditions (list[str]): A list of keywords to identify columns for each condition
+                                (e.g., ['Control', 'AFII', 'Treated']).
+
+    Returns:
+        pd.DataFrame: A DataFrame with columns for the count and percentage of
+                      quantified values for each condition.
+    """
+
+    all_stats = {}
+    for condition in conditions:
+        # Find all columns that match the condition keyword
+        condition_cols = df.columns[df.columns.str.contains(condition)]
+        
+        # Gracefully handle cases where no columns match
+        if condition_cols.empty:
+            print(f"⚠️ Warning: No columns found for condition '{condition}'. Skipping.")
+            continue
+        
+        # Count non-NA values per row for the matched columns
+        quantified_count = df[condition_cols].notna().sum(axis=1)
+        
+        # Calculate the percentage based on the total number of columns for that condition
+        total_cols_in_condition = len(condition_cols)
+        quantified_pctl = (quantified_count / total_cols_in_condition) * 100
+        
+        # Add the results to our dictionary
+        all_stats[f'{condition} Quantified Count'] = quantified_count
+        all_stats[f'{condition} Quantified Percentage'] = quantified_pctl.round(2) # Rounding for clarity
+
+    return pd.DataFrame(all_stats)
+
+def calculate_correlation_matrix(
+        data_df: pd.DataFrame, 
+        method: str = 'spearman', 
+        verbose: bool = False
+    ) -> pd.DataFrame:
+    """Calculates the pairwise correlation matrix for a given dataset."""
+    if verbose: print(f"  Calculating {method} correlation matrix...")
+    return data_df.corr(method=method)
+
+
+def calculate_quantification_matrix(
+        data_df: pd.DataFrame, 
+        as_ratio: bool = False, 
+        verbose=False
+    ) -> pd.DataFrame:
+    """Calculates the pairwise protein quantification matrix."""
+    if verbose: print("  Calculating pairwise quantification matrix...")
+    samples = data_df.columns
+    total_proteins = len(data_df)
+    quant_matrix = pd.DataFrame(1.0, index=samples, columns=samples, dtype=float)
+
+    for s1, s2 in combinations(samples, 2):
+        common_count = data_df[[s1, s2]].dropna().shape[0]
+        quant_ratio = common_count / total_proteins
+        quant_matrix.loc[s1, s2] = quant_matrix.loc[s2, s1] = quant_ratio
+        
+    return quant_matrix if as_ratio else quant_matrix * 100
+
+
+def calculate_cv_matrix(
+        data_df: pd.DataFrame, 
+        as_ratio: bool = False, 
+        verbose=False
+    ) -> pd.DataFrame:
+    """Calculates the pairwise median Coefficient of Variation (CV) matrix."""
+    if verbose: print("  Calculating pairwise CV matrix...")
+    samples = data_df.columns
+    cv_matrix = pd.DataFrame(0.0, index=samples, columns=samples, dtype=float)
+
+    for s1, s2 in combinations(samples, 2):
+        subset = data_df[[s1, s2]].dropna()
+        if len(subset) > 1:
+            cv_vals = cv_numpy(subset.values, axis=1, ignore_nan=True, format="ratio")
+            cv_matrix.loc[s2, s1] = np.nanmedian(cv_vals)
+        else:
+            cv_matrix.loc[s2, s1] = np.nan
+            
+    return cv_matrix if as_ratio else cv_matrix * 100
+
+
+def create_composite_pairwise_matrix(
+        matrices: dict[str, pd.DataFrame],
+        weights: dict[str, float] = None,
+        verbose: bool = True
     ) -> pd.DataFrame:
     """
-        Imputes missing values in a DataFrame using the K-Nearest Neighbors algorithm.
+    Creates a robust, composite pairwise score matrix from multiple metric matrices.
 
-        Args:
-            data: The DataFrame with missing values (NaN).
-            n_neighbors: Number of neighbors to use for imputation.
+    This function normalizes each metric to a 0-1 scale before applying weights,
+    preventing any single metric from disproportionately influencing the result.
 
-        Returns:
-            A DataFrame with imputed values.
+    Args:
+        matrices (dict): A dictionary where keys are metric names (e.g., 'correlation')
+                         and values are the corresponding pairwise metric DataFrames.
+                         It assumes 'cv' is the only metric where lower is better.
+        weights (dict, optional): A dictionary with the same keys as `matrices`,
+                                  specifying the importance of each metric.
+                                  Defaults to equal weights if None.
 
-        Raises:
-            ValueError: If n_neighbors is not a positive integer.
+    Returns:
+        pd.DataFrame: A single, composite pairwise score matrix.
     """
+    if weights is None:
+        # Default to equal weights if none are provided
+        weights = {key: 1.0 for key in matrices.keys()}
 
-    if n_neighbors <= 0:
-        raise ValueError("n_neighbors must be a positive integer.")
+    # Ensure all matrices and weights are aligned
+    sample_names = list(matrices.values())[0].columns
+    composite_matrix = pd.DataFrame(0.0, index=sample_names, columns=sample_names)
+    total_weight = sum(weights.values())
 
-    df = data.copy()  
-    numerical_cols = df.select_dtypes(include=[np.number]).columns
-    imputer = KNNImputer(n_neighbors=n_neighbors)
-    df[numerical_cols] = imputer.fit_transform(df[numerical_cols])
-    return df
+    if total_weight == 0:
+        return composite_matrix # Avoid division by zero
 
-def iterative_imputation(data: pd.DataFrame, estimator=None) -> pd.DataFrame:
-    """Imputes missing values using IterativeImputer with an optional estimator."""
-    df = data.copy()
-    numerical_cols = df.select_dtypes(include=[np.number]).columns
-    imputer = IterativeImputer(estimator=estimator)  
-    df[numerical_cols] = imputer.fit_transform(df[numerical_cols]).round(2)
-    return df
+    for name, matrix in matrices.items():
+        if name not in weights or weights[name] == 0:
+            continue
 
-def linear_regression_imputation(data: pd.DataFrame) -> pd.DataFrame:
-    """Imputes missing values using IterativeImputer with LinearRegression."""
-    return iterative_imputation(data, estimator=LinearRegression())
+        # --- Score Transformation (Higher is always better) ---
+        if name == 'cv':
+            # For CV, lower is better, so we invert the score.
+            # Adding a small epsilon to avoid division by zero if CV is 0.
+            score_matrix = 1 / (1 + matrix)
+        else:
+            # For correlation and quantification, higher is already better.
+            score_matrix = matrix.copy()
 
-def normalize_against_condition(
-        long_data: pd.DataFrame,                   
-        cond_run_dict: dict,                       
-        run_col: str = "filename",                 
-        index_cols: list = ["protein_id", "peptide_id"], 
-        norm_against: str = "day1",                
-        intensity_col: str = "intensity",          
-        is_log2: bool = False,                     
-        norm_intensity_col: str = "ms1adj"         
+        # --- Normalization and Weighting ---
+        # Normalize the score from 0 to 1 to ensure fair contribution
+        # We must handle the diagonal (self-to-self score) separately
+        diag_vals = np.diagonal(score_matrix).copy()
+        np.fill_diagonal(score_matrix.values, np.nan) # Ignore diagonal for scaling
+        
+        normalized_values = minmax_scale(score_matrix.values[np.isfinite(score_matrix.values)])
+        score_matrix.values[np.isfinite(score_matrix.values)] = normalized_values
+        
+        # Restore the diagonal (usually a perfect score of 1.0)
+        np.fill_diagonal(score_matrix.values, diag_vals)
+        score_matrix.fillna(1.0, inplace=True) # Fill diagonal NaNs with 1
 
+        # Add the weighted, normalized score to the composite matrix
+        composite_matrix += score_matrix * weights[name]
+
+    # Final score is the weighted average
+    final_matrix = composite_matrix / total_weight
+    return final_matrix
+
+def find_outliers_from_matrix(
+    composite_matrix: pd.DataFrame,
+    iqr_multiplier: float = 1.5,
+    verbose: bool = True
+) -> list:
+    """
+    Identifies outliers from a composite score matrix using the IQR method.
+
+    Args:
+        composite_matrix (pd.DataFrame): The final pairwise composite score matrix.
+        iqr_multiplier (float): The multiplier for the IQR range.
+        verbose (bool): If True, prints the detection threshold and results.
+
+    Returns:
+        list: A list of sample names identified as outliers.
+    """
+    # Calculate the mean score for each sample, strictly excluding the diagonal
+    matrix = composite_matrix.copy()
+    np.fill_diagonal(matrix.values, np.nan)
+    mean_scores = matrix.mean(axis=1)
+
+    # Use the IQR method to find outliers on the lower end
+    q1 = mean_scores.quantile(0.25)
+    q3 = mean_scores.quantile(0.75)
+    iqr = q3 - q1
+    threshold = q1 - (iqr * iqr_multiplier)
+
+    outliers = mean_scores[mean_scores < threshold].index.tolist()
+
+    if verbose:
+        print(f"  [IQR Method] Outlier Threshold: < {threshold:.3f}. Found {len(outliers)} outlier(s): {outliers}")
+    
+    return outliers
+
+def run_metric_combination_analysis(
+    data_df: pd.DataFrame,
+    metric_weights: dict = None,
+    verbose: bool = True
+) -> pd.DataFrame:
+    """
+    Performs an exhaustive outlier analysis by testing all combinations of metrics
+    and provides a cleanly formatted summary.
+
+    Args:
+        data_df (pd.DataFrame): The data for a single condition.
+        metric_weights (dict, optional): Weights for combining metrics.
+        verbose (bool): If True, prints detailed step-by-step analysis.
+    """
+    # Pre-condition check: A minimum of 4 samples are needed for robust detection.
+    if data_df.shape[1] <= 3:
+        print("\nSKIPPING ANALYSIS: A minimum of 4 samples is required.")
+        return pd.DataFrame()
+
+    outlier_tally = Counter()
+    outlier_details = {}
+
+    if verbose:
+        print("  Pre-calculating base metric matrices...")
+    base_matrices = {
+        'correlation': calculate_correlation_matrix(data_df),
+        'quantification': calculate_quantification_matrix(data_df, as_ratio=True),
+        'cv': calculate_cv_matrix(data_df, as_ratio=True)
+    }
+
+    metric_names = list(base_matrices.keys())
+    
+    for r in range(1, len(metric_names) + 1):
+        for metric_group in combinations(metric_names, r):
+            analysis_name = " & ".join(metric_group)
+            if verbose:
+                print(f"\n--- Analyzing with metrics: {analysis_name} ---")
+
+            matrices_for_analysis = {name: base_matrices[name] for name in metric_group}
+            composite_matrix = create_composite_pairwise_matrix(matrices_for_analysis, weights=metric_weights)
+            
+            # The outlier detection function is now simpler
+            outliers = find_outliers_from_matrix(composite_matrix, verbose=verbose)
+
+            if outliers:
+                outlier_tally.update(outliers)
+                for outlier in outliers:
+                    outlier_details.setdefault(outlier, []).append(analysis_name)
+
+    if verbose:
+        # --- Generate and Print Final Report ---
+        header = f" FINAL REPORT FOR {data_df.columns.name or 'CONDITION'} "
+        print("\n" + f"{header:=^64}")
+
+    if not outlier_tally:
+        if verbose:
+            print("No consistent outliers were identified.")
+            print("=" * 64)
+        return pd.DataFrame()
+
+    report_df = pd.DataFrame(outlier_tally.items(), columns=['Sample', 'Outlier_Vote_Count'])
+    report_df['Flagged_In'] = report_df['Sample'].map(outlier_details)
+    report_df = report_df.sort_values(by='Outlier_Vote_Count', ascending=False).reset_index(drop=True)
+    
+    if verbose:
+        # Use to_string() for pretty table formatting
+        print(report_df.to_string(index=False))
+        print("=" * 64)
+    
+    return report_df
+
+
+def identify_outlier_samples(
+        data: pd.DataFrame,
+        sample_groups: Dict[str, List[str]],
+        analysis_func: Callable[..., pd.DataFrame],
+        min_outlier_occurrence: int = 3,
+        verbose: bool = True,
+        **analysis_kwargs: Any
+    ) -> tuple[List[str], pd.DataFrame]:
+    """
+    Identifies outlier samples across all groups and returns a consolidated report.
+
+    Args:
+        data: The full data matrix (samples as columns).
+        sample_groups: Dictionary mapping group names to lists of sample names.
+        analysis_func: Function to run outlier analysis on a group's data.
+                       Must return a DataFrame with ['Sample', 'Outlier_Vote_Count'].
+        min_outlier_occurrence: Minimum votes to consider a sample an outlier.
+        verbose: If True, prints progress and a summary.
+        **analysis_kwargs: Additional keyword arguments for analysis_func.
+
+    Returns:
+        A tuple containing:
+        - all_outliers (List[str]): A single list of unique outlier sample names from all groups.
+        - combined_report (pd.DataFrame): A single DataFrame containing all analysis
+                                          reports, with a 'Condition' column added.
+    """
+    all_outliers = []
+    report_list = []
+
+    for group, samples in sample_groups.items():
+        if verbose:
+            print(f"\n{'='*20} RUNNING META-ANALYSIS FOR: {group} {'='*20}")
+            
+        group_data = data[samples].copy()
+        group_data.columns.name = f"{group} Samples"
+        
+        report = analysis_func(group_data, verbose=verbose, **analysis_kwargs)
+
+        if not report.empty:
+            # Add the condition label to the report
+            report['Condition'] = group
+            report_list.append(report)
+            
+            # Find and store outliers for this group
+            outliers = report.loc[report['Outlier_Vote_Count'] >= min_outlier_occurrence, 'Sample'].tolist()
+            all_outliers.extend(outliers)
+            
+            if verbose:
+                print(f" - Outliers found in {group} (>= {min_outlier_occurrence} votes): {outliers}")
+
+    # Combine all individual reports into a single DataFrame
+    combined_report = pd.concat(report_list, ignore_index=True) if report_list else pd.DataFrame()
+    
+    # Return a unique list of all outliers and the combined report
+    return list(set(all_outliers)), combined_report
+
+
+def create_cv_group_plot_data(
+    cv_data: pd.DataFrame, 
+    cv_group_palettes: Dict[str, str], 
+    id_col: Union[str, List[str]] = "Protein"
     ) -> pd.DataFrame:
     """
-        Function to normalize the data against a condition for my method
+    Transforms coefficient of variation (CV) data into a long-format DataFrame
+    for plotting, categorizing CV values into groups based on a provided palette dictionary.
 
-        Args:
-            long_data (pd.DataFrame): Long data with intensity values
-            cond_run_dict (dict): Dictionary with condition: [run1, run2, ...]
-            run_col (str): Column with the run names (used for pivoting)
-            index_cols (list): Used for wide data and merging
-            norm_against (str): Has to be one of the conditions
-            intensity_col (str): Column with the intensity values
-            is_log2 (bool): If the data is log2 transformed already
-            norm_intensity_col (str): Column name for the normalized intensities
+    Args:
+        cv_data (pd.DataFrame): DataFrame with features as index (can be single or MultiIndex),
+                    conditions as columns, and CV values as data.
+        cv_group_palettes (Dict[str, str]): Dict where keys are string labels for CV groups and values are color codes.
+        id_col (Union[str, List[str]]): Name(s) for the feature identifier column(s). If MultiIndex, provide list of names.
 
-        Returns:
-            pd.DataFrame: Long data with normalized intensities
-
-        Raises:
-            ValueError: If run_col, intensity_col, or index_cols are not in the long_data
-            ValueError: If norm_against is not in the cond_run_dict keys
-
-        Examples:
+    Returns:
+        pd.DataFrame: Long-format DataFrame with columns for feature ID(s), Condition, CV, and CVGroup.
     """
-    
-    # index_cols must be a list
-    if not isinstance(index_cols, list):
-        index_cols = [index_cols]
+    # 1. Dynamically determine bins and labels from the palette
+    labels = list(cv_group_palettes.keys())
+    bin_edges = [int(re.search(r'\d+', key).group()) for key in labels[:-1]]
+    bins = [-np.inf] + bin_edges + [np.inf]
 
-    # check necessary columns if they are in the long_data
-    for col in [run_col, intensity_col, *index_cols]:
-        if col not in long_data.columns:
-            raise ValueError(f"{col} not found in the columns of long_data")
-        
-    # Check if norm_against is key in the cond_run_dict with list of values
-    if norm_against not in cond_run_dict.keys():
-        raise ValueError(f"{norm_against} not found in the cond_run_dict keys")
+    # 2. Prepare id_vars for melt
+    if isinstance(cv_data.index, pd.MultiIndex):
+        if isinstance(id_col, str):
+            id_col = list(cv_data.index.names)
+        elif isinstance(id_col, (list, tuple)):
+            id_col = list(id_col)
+        else:
+            raise ValueError("id_col must be a string or a list of strings for MultiIndex.")
+        plot_data = cv_data.reset_index().melt(
+            id_vars=id_col,
+            value_name="CV",
+            var_name="Condition"
+        )
     else:
-        normCols = cond_run_dict[norm_against]
-        
-    wide_data = long_data.pivot_table(
-        index=index_cols,
-        columns=[run_col],
-        values=intensity_col,
-    )
-    if not is_log2:
-        wide_data = np.log2(wide_data)
+        id_name = id_col if isinstance(id_col, str) else (cv_data.index.name or "Feature")
+        plot_data = cv_data.reset_index().melt(
+            id_vars=[id_name],
+            value_name="CV",
+            var_name="Condition"
+        )
 
-    # Center the data by
-    wide_data = (wide_data - wide_data.mean()) / wide_data.std()
-
-    # Calculate the row-means for norm_against samples
-    cntrRowMean = wide_data[normCols].mean(axis=1)
-    # Subtract the row-means from the data
-    wide_data = wide_data.sub(cntrRowMean, axis=0)
-
-    # Return the data back to long format
-    wide_data.reset_index().melt(
-        id_vars=index_cols,
-        var_name="filename",
-        value_name=norm_intensity_col,
+    # 3. Create the CVGroup column by binning the CV values
+    plot_data["CVGroup"] = pd.cut(
+        x=plot_data["CV"],
+        bins=bins,
+        labels=labels,
+        include_lowest=True,
+        right=False
     )
 
-    # Merge the normalized data with the original data
-    long_data = pd.merge(
-        # Original data
-        long_data,
-        # Return the data back to long format
-        wide_data.reset_index().melt(
-            id_vars=index_cols,
-            var_name="filename",
-            value_name=norm_intensity_col,
-        ),
-        # Merge on the index_cols and filename
-        on=[*index_cols, "filename"],
-        # Use left join
-        how="left",
-    )
+    return plot_data
 
-    return long_data
-
-def update_proteoform_grouping_in_COPF(
-        data: pd.DataFrame,
-        score_thr: float = 0.5,      # Specific to COPF if None, it will not be used
-        pval_thr: float = 0.05,
-        protein_col: str = "protein_id",
-        cluster_col: str = "cluster",
-        pval_col: str = "proteoform_score_pval_adj",
-        score_col: str = "proteoform_score",
-        sep: str = "_"
-    ):
-    # Create initial proteoform_id based on score and pval thresholds
-    if score_thr is not None:
-        condition = (data[score_col] >= score_thr) & (data[pval_col] <= pval_thr)
-    else:
-        condition = data[pval_col] <= pval_thr
-    
-    data['proteoform_id'] = data[protein_col]
-    data.loc[condition, 'proteoform_id'] = data.loc[condition].apply(
-        lambda row: f"{row[protein_col]}{sep}{int(row[cluster_col])}", axis=1
-    )
-    # If proteoform_id is exactly the same as protein_id, add "_0" to the cluster 0
-    data.loc[data[protein_col] == data['proteoform_id'], 'proteoform_id'] = data[protein_col] + f"{sep}0"
-    
-    # Special case for cluster 100
-    data.loc[data[cluster_col] == 100, 'proteoform_id'] = data[protein_col] + f"{sep}0"
-    
-    # Count unique proteoform_id per protein_id
-    n_proteoforms = data.groupby(protein_col)['proteoform_id'].transform('nunique')
-    
-    # Adjust n_proteoforms if "_0" exists
-    has_zero_cluster = data['proteoform_id'].str.endswith(f'{sep}0')
-    n_proteoforms -= has_zero_cluster.groupby(data[protein_col]).transform('sum')
-    
-    # Final adjustment of proteoform_id
-    data.loc[n_proteoforms.isin([0, 1]), 'proteoform_id'] = data[protein_col]
-    
-    return data
+# ======================================================================================
+# Performance Metrics and Calculations
+# ======================================================================================
 
 def generate_thresholds(
         base: float, 
@@ -1340,56 +827,6 @@ def calculate_f1_score(
 
     return f1
 
-def build_proteoform_groups( # Specific for benchmark only
-        cur_protein: str,
-        data: pd.DataFrame,
-        sample_col: str = "filename",
-        peptide_col: str = "peptide_id",
-        protein_col: str = "protein_id",
-        quant_col: str = "log2_intensity", # Quant column to use for cluster    
-        corrMethod: str = "kendall",
-        distanceMethod: str = "euclidean",
-        linkageMethod: str = "complete",
-        minSizePct: float = 0.50,
-        absoluteMaxSize: int = 3,
-        aggfunc: str = "mean",
-        verbose: bool = 0
-    ):
-
-    # Get the data for the current protein
-    try: 
-        subdata = data.loc[cur_protein]
-    except :
-        try: 
-            subdata = data[data[protein_col] == cur_protein]
-        except:
-            raise ValueError("Protein not found in data")
-
-    pep_idx = subdata[peptide_col].unique()
-
-    # Convert long to wide format and calculate the correlation matrix
-    corr_matrix  = subdata.pivot_table(
-        index=peptide_col,
-        columns=sample_col,
-        values=quant_col,
-        aggfunc=aggfunc
-    ).loc[pep_idx].T.corr(method=corrMethod).values
-    # Find the clusters
-    clusters = _find_clusters_v2(
-        corr_matrix, 
-        distanceMethod, 
-        linkageMethod, 
-        minSizePct, 
-        absoluteMaxSize,
-        verbose = verbose
-    )
-
-    return pd.DataFrame({
-        protein_col: cur_protein,
-        peptide_col: pep_idx,
-        "cluster_id": clusters
-    })
-
 def calculate_metrics(
         true_labels: pd.Series,
         pred_labels: pd.Series,        
@@ -1418,7 +855,9 @@ def calculate_metrics(
         columns=pred_labels     # Predicted labels
     )
     # Reindex to ensure both True and False are present for both columns and rows
-    conf_matrix = conf_matrix.reindex(index=[True, False], columns=[True, False], fill_value=0)
+    conf_matrix = conf_matrix.reindex(
+        index=[True, False], columns=[True, False], fill_value=0
+    )
     
     # Extract the values from the confusion matrix
     TP = conf_matrix.loc[True, True]
@@ -1427,7 +866,7 @@ def calculate_metrics(
     FN = conf_matrix.loc[True, False]   
 
     # Calculate metrics
-    TPR = TP / (TP + FN) if (TP + FN) != 0 else 0  # Handle potential division by zero
+    TPR = TP / (TP + FN) if (TP + FN) != 0 else 0
     FPR = FP / (FP + TN) if (FP + TN) != 0 else 0
     FDR = FP / (FP + TP) if (FP + TP) != 0 else 0
     # MCC = calculate_mcc(TP, TN, FP, FN)
@@ -1503,520 +942,155 @@ def create_metric_data(
     # Create a DataFrame from the list of metric dictionaries
     return pd.DataFrame(metrics_data)
 
-########################## Simulation Functions ##########################
-
-def sample_peptides(
-        peptides: pd.Series,
-        n: int
-    ) -> pd.Series:
+def complete_curve_data(df, curve_type, x_col, y_col):
     """
-        Utility function to sample n peptides from the given
-        peptides Series
+    Ensures data for ROC or PR curves is complete by adding boundary points.
 
-        Args:
-            peptides (pd.Series): Peptides Series
-            n (int): Number of peptides to sample
-        
-        Returns:
-            pd.Series: Series with sampled peptides
+    This version intelligently fills other columns for new points using the
+    first row as a template, ensuring identifiers like 'method' and
+    'perturbation' are preserved. Other metrics are set to NaN.
+
+    Args:
+        df (pd.DataFrame): The input data for the curve.
+        curve_type (str): The type of curve, either 'ROC' or 'PR'.
+        x_col (str): The name of the column for the x-axis (e.g., 'FPR').
+        y_col (str): The name of the column for the y-axis (e.g., 'TPR').
+
+    Returns:
+        pd.DataFrame: The completed DataFrame with necessary boundary points.
     """
-    if n > 0 and n <= len(peptides):
-        return peptides.isin(np.random.choice(peptides, n, replace=False))
+    if df.empty:
+        return df
+
+    if curve_type == 'ROC':
+        required_points = [(0, 0), (1, 1)]
+    elif curve_type == 'PR':
+        required_points = [(0, 1), (1, 0)]
     else:
-        return peptides.isin([])
+        raise ValueError("curve_type must be either 'ROC' or 'PR'")
 
-def calculate_nPerturb(
-        nPeptides: int,
-        perturbNumber: str
-    ) -> int:
-    """
-        Utility function to calculate the number of 
-        peptides to perturb based on the perturbNumber
-
-        Args:
-            nPeptides (int): Number of peptides
-            perturbNumber (str): Perturbation number
-        
-        Returns:
-            int: Number of peptides to perturb
-    """
-    if perturbNumber == "one":
-        nPerturb = 1
-    elif perturbNumber == "two":
-        nPerturb = 2
-    elif perturbNumber == "quarter":
-        nPerturb = nPeptides // 4
-    elif perturbNumber == "half":
-        nPerturb = nPeptides // 2
-    elif perturbNumber == "random":
-        nPerturb = np.random.randint(2, nPeptides // 2 + 1)
-    return nPerturb
-
-def perturb_proteins(
-        data: pd.DataFrame,                 # Long format data with 
-        info: pd.DataFrame,                 # Info data with protein-peptide info
-        proteinPertDict: dict,              # Dictionary with protein:red_factor (perturbed proteins)
-        perturbN: str = "random",           # Number of peptides to perturb (one, two, quarter, half, random)
-        proteinCol: str = "Protein",        # Protein column name
-        peptideCol: str = "Mod.Peptide",    # Peptide column name
-        intensityCol: str = "Intensity",    # Intensity column name
-        conditionCol: str = "Condition",    # Condition column name
-        condition2Perturb: str = "day5"     # Condition to perturb
-
-    ) -> pd.DataFrame:
-
-    """
-        Function to perturb the proteins in the data based on the
-        proteinPertDict and perturbN settings
-
-        Args:
-            data (pd.DataFrame): Long format data with protein-peptide info
-            info (pd.DataFrame): Info data with protein-peptide info
-            proteinPertDict (dict): Dictionary with protein:red_factor (perturbed proteins)
-            perturbN (str): Number of peptides to perturb (one, two, quarter, half, random)
-            proteinCol (str): Protein column name
-            peptideCol (str): Peptide column name
-            intensityCol (str): Intensity column name
-            conditionCol (str): Condition column name
-            condition2Perturb (str): Condition to perturb
-
-        Returns:
-            pd.DataFrame: Data with perturbed proteins
-    """
+    # Use a list to collect dataframes to concat at the end for efficiency
+    dfs_to_concat = [df]
     
-    # Get the unique proteins set to perturb
-    perturbed_proteins = list(proteinPertDict.keys())
-    # Store the perturbed protein information (boolean)
-    info["perturbed_protein"] = info[proteinCol].isin(perturbed_proteins)
-    # Store the number of peptides per protein
-    info["nPeps"] = info[proteinCol].map(info.groupby(proteinCol).size())
-    # Store the number of peptides to perturb based on the perturbN setting
-    info["nPerPeps"] = info[proteinCol].map(
-        info.groupby(proteinCol).size().map(
-            lambda x: calculate_nPerturb(x, perturbN)
-        )
-    )
-    # If perturb_protein is False, set nPerPeps to 0
-    info.loc[~info["perturbed_protein"], "nPerPeps"] = 0
-    # Store the red factor for the perturbed proteins
-    info["red_factor"] = info[proteinCol].map(proteinPertDict).fillna(1)
-    # Randomly pick nPerPeps peptides from each protein
-    info["perturbed_peptide"] = info.groupby(proteinCol)[peptideCol].transform(
-        lambda x: sample_peptides(x, info.loc[x.index, "nPerPeps"].iloc[0])
-    )
-    
-    # Merge the info data with the data
-    data = data.merge( info, on=[proteinCol, peptideCol], how="left" )
+    # Get the first row as a template. This preserves all other column values.
+    template_row_df = df.iloc[[0]].copy()
 
-    # If the peptide is perturbed and the condition is the one to perturb, 
-    #  multiply the intensity by the red factor
-    # else keep the intensity as it is
-    # 
-    data["PerturbedIntensity"] = np.where(
-        (data["perturbed_peptide"]) & (data[conditionCol] == condition2Perturb),
-        data[intensityCol] * data["red_factor"],
-        data[intensityCol]
-    )   
-
-    return data
-
-
-########################## Correlation-Based Proteoform Groups ##########################
-
-def calculate_quality_score(
-        mean: float,
-        median: float,
-        std: float,
-        var: float,
-        size: int,
-        method: str = 'weighted_sum_with_cv'
-    ) -> float:
-    """
-        Calculate a quality score for a given set of statistics.
-
-        Args:
-            mean (float): Mean value.
-            median (float): Median value.
-            std (float): Standard deviation.
-            var (float): Variance.
-            size (int): Size of the data.
-            method (str): Method to calculate the quality score.
-
-        Returns:
-            float: The quality score.
-
-        Raises:
-            ValueError: If the method is not recognized.
-            ZeroDivisionError: If the mean is zero when calculating CV.
-    """
-
-    if method == 'weighted_sum_with_cv':
-        # Define weights for each statistic
-        weights = {
-            'mean': 0.4,
-            'median_deviation': 0.15,  # Penalize deviation from median
-            'cv': 0.3,
-            'size': 0.15
-        }
-
-        if mean == 0:
-            raise ZeroDivisionError("Mean cannot be zero when calculating Coefficient of Variation.")
-
-        cv = std / mean  # Calculate Coefficient of Variation
-
-        # Calculate weighted sum
-        score = (
-            weights['mean'] * mean -
-            weights['median_deviation'] * abs(mean - median) -
-            weights['cv'] * cv +
-            weights['size'] * size
-        )
-    elif method == 'weighted_sum':
-        # Define weights for each statistic
-        weights = {
-            'mean': 0.4,
-            'median': 0.15,
-            'std': 0.3,
-            'size': 0.15
-        }
-
-        # Calculate weighted sum
-        score = (
-            weights['mean'] * mean -
-            weights['std'] * std +
-            weights['size'] * size
-        )
-    elif method == 'custom':
-        # Define a custom formula for the quality score
-        score = mean / (var + 1) * size
-
-    elif method == 'z_scored':
-        # Calculate the z-score of the mean
-        z_score = (mean - median) / (std+1e-6)
-        # Calculate the quality score
-        score = z_score * size
-
-    else:
-        raise ValueError("Unknown method: {}".format(method))
-    
-    return score
-
-# TODO: Better Name
-def make_res_dict(
-        distance,
-        cluster,
-        cluster_indices,
-        corr_matrix,
-        clusterScoreMethod='custom'
-    ):
-    """
-        TODO: Make a better description
-    """
-    # Subset the corr_matrix with the cluster indices
-    cluster_corr = corr_matrix[cluster_indices][:, cluster_indices]
-    m = np.nanmean(cluster_corr)
-    s = np.nanstd(cluster_corr)
-    v = np.nanvar(cluster_corr)
-    md = np.nanmedian(cluster_corr)
-    n = len(cluster_indices)
-    
-    res = {
-        "Distance": distance,
-        "Cluster": cluster,
-        "Members": cluster_indices.tolist(),
-        "Mean": m,
-        "Var": v,
-        "Size": n,
-        "Score": calculate_quality_score(m, md, s, v, n, method=clusterScoreMethod),
-    }
-
-    return res
-
-def get_significant_ids(tmp):
-    signArr = tmp["isSignificant"].values
-    pepIDArr = tmp["PeptideID"].values
-
-    return pepIDArr[signArr]
-
-def find_clusters_with_significant_member(unique_members, significant_ids, mapper=None):
-    # Added a mapper to go from the text indices to numeric indices if needed
-    if mapper is not None:
-        # Modify the significant_ids based on the mapper
-        significant_ids = [mapper[i] for i in significant_ids]
-        
-    member_map = {}
-    for i in unique_members:
-        l = eval(i)
-        # Check if the member contains any value in b
-        if any(x in significant_ids for x in l):
-            member_map[i] = True
-        else:
-            member_map[i] = False
-    
-    return member_map
-
-def select_best_distance(data, method="sum"):
-    # if method not in ["max", "mean", "min", "sum", "median", "std"]:
-    #     raise ValueError("Invalid method provided, please choose from max, mean, min, sum, median, std")
-
-    scores = data.groupby("Distance")["Combined_Score"].agg(method).reset_index()
-
-    # Sort the distances by score (descending) and distance (ascending)
-    scores = scores.sort_values(by=["Combined_Score", "Distance"], ascending=[False, True])
-    
-    # Iterate through the sorted distances and check for the first distance with a significant cluster
-    for distance in scores["Distance"]:
-        if data.loc[data["Distance"] == distance, "Significant"].sum() > 0:
-            return data.loc[data["Distance"] == distance]
-    
-    # If no significant cluster is found, return None
-    return None
-
-def _find_clusters(
-        corr_matrix: np.ndarray,
-        distanceMethod: str = "euclidean",
-        linkageMethod: str = "complete",
-        minSizePct: int = 0.25,
-        verbose: bool = 0
-    ) -> np.ndarray:
-        """
-            Utility function to find clusters based on the correlation matrix, using the
-                specified distance and linkage methods with minSizePct passed to dynamicTreeCut.
-
-            Args:
-                corr_matrix (np.ndarray): The correlation matrix.
-                distanceMethod (str): The distance method to use.
-                linkageMethod (str): The linkage method to use.
-                minSizePct (int): The minimum size percentage for the clusters.
-                verbose (bool): Whether to print additional information.
+    for x, y in required_points:
+        # Check if the point exists
+        if not ((df[x_col] == x) & (df[y_col] == y)).any():
+            # Create a new row from the template
+            new_row = template_row_df.copy()
             
-            Returns:
-                np.ndarray: The cluster labels.
-        """
-        
-        nPeptides = len(corr_matrix)
-        minClusterSize = max(1, int(nPeptides * minSizePct)) # Minimum cluster size
-        if verbose: print(" - minClusterSize =", minClusterSize)
-        # Calculate the distance matrix
-        distance_matrix = 1 - corr_matrix
-        # Calculate the distances
-        distances = pdist(distance_matrix, metric=distanceMethod)
-        # Calculate the linkage matrix
-        link = linkage(distances, method=linkageMethod)
-        # Calculate the clusters
-        clusters = cutreeHybrid(link, distances, minClusterSize=minClusterSize, verbose=verbose)
-        return clusters['labels']
+            # Set the x and y values for the new point
+            new_row[x_col] = x
+            new_row[y_col] = y
+            
+            # Set other non-identifier metrics to NaN as they are not applicable
+            for col in new_row.columns:
+                if col not in df.columns.tolist() or col in [x_col, y_col]:
+                    continue
+                # Preserve identifiers by checking if the column has a single unique value
+                if df[col].nunique() == 1:
+                    continue
+                new_row[col] = np.nan
+            
+            dfs_to_concat.append(new_row)
 
+    # Concatenate the original DataFrame with any new rows
+    completed_df = pd.concat(dfs_to_concat, ignore_index=True)
 
+    # Sort the final DataFrame by the x-axis column
+    return completed_df.sort_values(by=x_col).reset_index(drop=True)
 
-def _find_clusters_v2(
-        corr_matrix: np.ndarray,
-        distanceMethod: str = "euclidean",
-        linkageMethod: str = "complete",
-        maxSizePct: float = 0.75,
-        absoluteMaxSize: int = 3,
-        verbose: bool = 0
-    ) -> np.ndarray:
-    """
-    Utility function to find clusters based on the correlation matrix, using the
-    specified distance and linkage methods with maxSizePct passed to cut_balanced.
-
-    Args:
-        corr_matrix (np.ndarray): The correlation matrix.
-        distanceMethod (str): The distance method to use.
-        linkageMethod (str): The linkage method to use.
-        maxSizePct (float): The maximum size percentage for the clusters.
-        verbose (bool): Whether to print additional information.
-
-    Returns:
-        np.ndarray: The cluster labels.
-    """
-    
-    nPeptides = len(corr_matrix)
-    maxClusterSize = max(absoluteMaxSize, int(nPeptides * maxSizePct))  # Maximum cluster size
-    if verbose: print(" - maxClusterSize =", maxClusterSize)
-    
-    # Calculate the distance matrix
-    distance_matrix = 1 - corr_matrix
-    
-    # Calculate the distances
-    distances = pdist(distance_matrix, metric=distanceMethod)
-    try:
-        # Calculate the linkage matrix
-        link = linkage(distances, method=linkageMethod)
-    except:
-        # Ensure the correlation matrix contains only finite values
-        corr_matrix = np.nan_to_num(corr_matrix, nan=0.0, posinf=1.0, neginf=-1.0)
-        # Calculate the distance matrix
-        distance_matrix = 1 - corr_matrix
-        # Calculate the distances
-        distances = pdist(distance_matrix, metric=distanceMethod)
-        # Calculate the linkage matrix
-        link = linkage(distances, method=linkageMethod)
-        
-    # Calculate the clusters using cut_balanced
-    clusters = cut_balanced(link, max_cluster_size=maxClusterSize)
-    
-    return clusters
-
-def peptide_clusters(
-        cur_protein: str,
-        quant_data: pd.DataFrame,
-        info_data: pd.DataFrame,
-        data_format: str = "wide", # wide (only quant) or long (quant columns + info columns)
-        quantcol: str = "ms1adj",
-        samplecol: str = "filename",  
-
-        corrMethod: str = "spearman",
-        distanceMethod: str = "euclidean",
-        linkageMethod: str = "complete",
-        minSizePct: float = 0.25,
-        aggfunc: str = "mean",
-
-        # Column Definitions
-        proteinCol: str = "Protein",
-        peptideCol: str = "Peptide",
-        peptideIDCol: str = "PeptideID",
-
-        verbose: bool = 0
+def grouping_performance_proteoforge(
+        data: pd.DataFrame,
+        thresholds: list,
+        pvalue_col: str = 'proteoform_score_pval',
+        protein_col: str = 'protein_id',
+        cluster_col: str = 'cluster',
+        perturbation_col: str = 'pertPFG',
     ):
+        metrics_data = []
+        for thr in thresholds:
+            tmp = data.copy()
+            # Determine the significant peptides
+            tmp['isSignificant'] = tmp[pvalue_col] < thr
+            # Create protein-level aggregated data
+            grouping_data = tmp.groupby(protein_col).agg({
+                perturbation_col: 'nunique',  # Get the pertPFG value for this protein
+                'isSignificant': 'any'  # Check if any peptide was significant
+            }).reset_index()
+            
+            grp = tmp.groupby([protein_col, cluster_col])
+            cluster_stats = grp['isSignificant'].agg(['any', 'sum']).reset_index()
+            cluster_stats.columns = [protein_col, cluster_col, 'has_significant', 'peptide_count']
 
-    """
+            is_single_sig = cluster_stats['has_significant'] & (cluster_stats['peptide_count'] == 1)
+            is_multi_sig = cluster_stats['has_significant'] & (cluster_stats['peptide_count'] > 1)
 
-    """
-    # TODO: This is still problematic with multiple usecases, need to standardize
+            cluster_stats['dPF'] = 0
+            cluster_stats.loc[is_single_sig, 'dPF'] = -1
+            cluster_stats.loc[is_multi_sig, 'dPF'] = 1
+            # Derive per-protein summary: mark protein as having proteoforms if any cluster has dPF == 1.
+            # Encode True -> 2, False -> 0 as requested.
+            protein_level = cluster_stats.groupby(protein_col).agg(
+                pos_clusters=('dPF', lambda x: (x == 1).sum()),
+                neg_clusters=('dPF', lambda x: (x == -1).sum())
+            )
+            protein_level['has_proteoform'] = protein_level['pos_clusters'] > 0
+            # Encode: True -> 2, False -> 0
+            protein_level['dPF'] = (protein_level['has_proteoform'].astype(int) * 2)
+            protein_level = protein_level[['dPF']]
+            protein_level = protein_level.reset_index()  # bring 'Protein' back as column
+            grouping_data = grouping_data.merge(protein_level, on=protein_col, how='left')
+            grouping_data['predPFG'] = grouping_data['dPF'].fillna(0).astype(int)
+            grouping_data.drop(columns=['dPF'], inplace=True)
 
-    if verbose: print("Analyzing Protein:", cur_protein)
-    # Subset for protein
-    subset_info = info_data.loc[cur_protein].set_index([peptideCol])
-    subset_quan = quant_data.loc[cur_protein]
-    subset_quan[peptideIDCol] = subset_quan[peptideCol].map(subset_info[peptideIDCol].to_dict())
-    
-    # If data is long create wide data
-    if data_format == "long":
-        # Check if required columns are present
-        if not set([samplecol, quantcol]).issubset(subset_quan.columns):
-            raise ValueError("Required columns not found in the long data for conversion to wide.")
-        wide_data = subset_quan.pivot_table(
-            index=peptideIDCol,
-            columns=samplecol,
-            values=quantcol,
-            aggfunc=aggfunc
+            # True labels: pertPFG > 0 (protein has proteoforms)
+            # Note: pertPFG == -1 means no proteoforms, pertPFG >= 1 means proteoforms exist
+            y_true_protein = (grouping_data[perturbation_col] > 1).astype(bool)
+            # Predicted labels: dPF > 0 (detected proteoforms)
+            y_pred_protein = (grouping_data['predPFG'] > 1).astype(bool)
+            metrics = calculate_metrics(
+                true_labels=y_true_protein,
+                pred_labels=y_pred_protein,
+                verbose=False, return_metrics=True
+            )
+            metrics['threshold'] = thr
+            metrics_data.append(metrics)    
+        metrics_data = pd.DataFrame(metrics_data)
+        return metrics_data
+
+def grouping_performance_copf(
+        data: pd.DataFrame,
+        thresholds: list,
+        pvalue_col: str = 'proteoform_score_pval',
+        protein_col: str = 'protein_id',
+        cluster_col: str = 'cluster',
+        perturbation_col: str = 'pertPFG',
+    ):
+    metrics_data = []
+    tmp = data.copy()
+    for thr in thresholds:
+        tmp['isSignificant'] = tmp[pvalue_col] < thr
+        # Create protein-level aggregated data
+        grouping_data = tmp.groupby(protein_col).agg({
+            perturbation_col: 'nunique',  # Get the pertPFG value for this protein
+            cluster_col: 'nunique',  # Get the number of unique clusters (proteoforms) detected
+            'isSignificant': 'any'  # Check if any peptide was significant
+        }).reset_index()
+        # True labels: pertPFG > 0 (protein has proteoforms)
+        # Note: pertPFG == -1 means no proteoforms, pertPFG >= 1 means proteoforms exist
+        y_true_protein = (grouping_data[perturbation_col] > 1).astype(bool)
+        # Predicted labels: isSignificant and cluster > 1 (detected proteoforms)
+        y_pred_protein = (grouping_data['isSignificant']) & (grouping_data[cluster_col] > 1)
+        metrics = calculate_metrics(
+            true_labels=y_true_protein,
+            pred_labels=y_pred_protein,
+            verbose=False, return_metrics=True
         )
-    elif data_format == "wide":
-        wide_data = subset_quan.set_index(peptideIDCol)
-        # Check if any columns are non-numeric
-        if subset_quan.select_dtypes(exclude=[np.number]).shape[1] > 0:
-            raise ValueError("Non-numeric columns found in the wide data.")
-    else:
-        raise ValueError("Invalid data_format provided, please choose from wide or long")
-        
-    # Create a correlation matrix for the protein
-    corr_matrix = wide_data.T.corr(method=corrMethod).values 
-    # Find the clusters
-    clusters = _find_clusters(corr_matrix, distanceMethod, linkageMethod, minSizePct)
-    
-    # Check if the clusters are valid (labels)
-    try:
-        return pd.DataFrame({
-            proteinCol: cur_protein,
-            "PeptideID": subset_info[peptideIDCol],
-            "Cluster": clusters
-        }).reset_index().set_index([proteinCol, peptideCol])
-    except :
-        return pd.DataFrame({
-            proteinCol: cur_protein,
-            "PeptideID": subset_info[peptideIDCol],
-            "Cluster": np.zeros(len(subset_info))-1
-        }).reset_index().set_index([proteinCol, peptideCol])
+        metrics['threshold'] = thr
+        metrics_data.append(metrics)
 
-from collections import defaultdict
-
-def expand_mismatches(x, y, reverse_mapping=False):
-  """
-    Expands mismatches between two dictionaries with clusterID: [PeptideIDs] 
-        mappings, handling cases where clusters might be missing in one 
-        of the inputs.
-
-    Args:
-        x: The first dictionary.
-        y: The second dictionary.
-        reverse_mapping: If True, returns a dictionary with PeptideID: clusterID mapping.
-                        If False (default), returns a dictionary with clusterID: [PeptideIDs] mapping.
-
-    Returns:
-        A dictionary with the specified mapping.
-  """
-
-  mapping = defaultdict(list)
-  cluster_id = 0
-
-  x_keys = set(x.keys())
-  y_keys = set(y.keys())
-  all_keys = x_keys | y_keys
-
-  for key in all_keys:
-    x_values = set(x.get(key, []))
-    y_values = set(y.get(key, []))
-
-    matches = x_values & y_values
-    for match in matches:
-      mapping[cluster_id].append(match)
-    cluster_id += 1
-
-    x_mismatches = x_values - y_values
-    for mismatch in x_mismatches:
-      mapping[cluster_id].append(mismatch)
-    cluster_id += 1
-
-    y_mismatches = y_values - x_values
-    for mismatch in y_mismatches:
-      mapping[cluster_id].append(mismatch)
-    cluster_id += 1
-
-  if reverse_mapping:
-    reversed_mapping = {}
-    for cluster_id, peptide_ids in mapping.items():
-      for peptide_id in peptide_ids:
-        reversed_mapping[peptide_id] = cluster_id
-    return reversed_mapping
-  else:
-    return mapping
-  
-def process_data(data):
-    """
-        Processes the data to determine dPFs based on two clusterings and significance.
-
-        Args:
-            data: A pandas DataFrame with columns "Protein", "cluster_id", 
-                "oldCluster", "PeptideID", and "isSignificant".
-
-        Returns:
-            The DataFrame with added "newClusters" and "new_dPFs" columns.
-    """
-
-    def apply_expand_mismatches(group):
-        x = group.groupby("cluster_id")["PeptideID"].apply(list).to_dict()
-        y = group.groupby("oldCluster")["PeptideID"].apply(list).to_dict()
-        consensus = expand_mismatches(x, y, reverse_mapping=True)
-        group["newClusters"] = group["PeptideID"].map(consensus)
-        return group
-
-    def calculate_dpfs(group):
-        dpf_id = 0
-        sig_clusters = group.groupby("newClusters")["isSignificant"].any()  # Clusters with at least one significant peptide
-        for cluster_id, has_sig_peptide in sig_clusters.items():
-            cluster_peptides = group[group["newClusters"] == cluster_id]
-            if not has_sig_peptide:
-                group.loc[cluster_peptides.index, "new_dPFs"] = 0  # No significant peptides
-            elif len(cluster_peptides) == 1:
-                group.loc[cluster_peptides.index, "new_dPFs"] = -1  # Single significant peptide
-            else:
-                dpf_id += 1
-                group.loc[cluster_peptides.index, "new_dPFs"] = dpf_id  # Multiple peptides with at least one significant
-
-        return group
-
-    data = data.groupby("Protein").apply(apply_expand_mismatches).reset_index(drop=True)
-    data = data.groupby("Protein").apply(calculate_dpfs).reset_index(drop=True)
-    return data
+    metrics_data = pd.DataFrame(metrics_data)
+    return metrics_data
