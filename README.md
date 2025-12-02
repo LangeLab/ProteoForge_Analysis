@@ -2,66 +2,82 @@
 
 | **`Status`** | **`License`** | **`Language`** | **`Release`** | **`Zenodo`** | **`Citation`** |
 |---|---:|:---:|:---:|:---:|:---:|
-| ![Status](https://img.shields.io/badge/Status-Under_Development-red) | [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc] | ![Language](https://img.shields.io/badge/Language-Python-yellow) | ![Release](https://img.shields.io/badge/Release-v1.0.0-green) | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10694635.svg)](https://doi.org/10.5281/zenodo.10694635) | [![Citation](https://img.shields.io/badge/Citation-ProteoForge_Analysis-lightgrey)](https://github.com/LangeLab/ProteoForge_Analysis/tree/Manuscript) |
+| ![Status](https://img.shields.io/badge/Status-Under_Development-red) | [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc] | ![Language](https://img.shields.io/badge/Language-Python-yellow) | ![Release](https://img.shields.io/badge/Release-v1.0.0-green) | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10694635.svg)](https://doi.org/10.5281/zenodo.10694635) | [![Citation](https://img.shields.io/badge/Citation-ProteoForge_Analysis-lightgrey)](#citations) |
 
-This repository contains the code, analyses, and rendered figures supporting the ProteoForge manuscript. It includes real-data benchmarks, simulation studies, and an application to a hypoxia study. The analyses use the ProteoForge Python package (included in the `ProteoForge/` folder) together with a collection of R and Python scripts and notebooks to run benchmarks and reproduce figures.
+This repository contains the code, analyses, and rendered figures supporting the ProteoForge manuscript. It includes real-data benchmarks, simulation studies, and an application to a hypoxia study. This repo is the analysis snapshot. The ProteoForge software package itself lives at: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge).
 
-## Repository layout
+## Repository Layout
 
 Top-level folders and their purpose:
 
-- `ProteoForge/` — core Python package used for the analyses (parsers, clustering, normalization, plotting, classifiers).
-- `Benchmark/` — scripts and notebooks for benchmark analyses and example workflows (R and Python).
-- `NSCLC/` — notebooks, data and figures for the hypoxia / NSCLC application.
+- `ProteoForge/` — core Python scripts used in analyses (parsers, processing, modelling, clustering, classifiers).
+- `Benchmark/` — scripts and notebooks for benchmark analyses (R and Python).
+- `NSCLC/` — notebooks, data and figures for the hypoxia/NSCLC application.
 - `Simulation/` — simulation scripts, notebooks and utilities used to evaluate methods.
-- `renders/` — rendered HTML versions of notebooks and assembled figures used for manuscript production.
 - `src/` — auxiliary Python library used by some scripts (utilities, plotting helpers, tests).
-- `renv/` — R environment metadata used to reproduce R analyses.
-- `requirements.txt`, `setup_project.sh`, `setup_env.R` — environment and setup helpers.
+- `renv/` — R environment metadata for reproducing R analyses.
+- `requirements.txt`, `setup_project.sh`, `setup_project.ps1`, `setup_env.R` — environment and setup helpers.
 
-Data and figures directories (large files) are excluded from git. See README sections below for how to obtain or regenerate inputs.
+Notes on data and outputs:
 
-## Quick start
+- Raw and derived data/figures are not committed. Place raw inputs under the appropriate `*/data/input/` folders; scripts/notebooks will write to `*/data/` and `*/figures/` (see folder READMEs).
+- A snapshot of the repository with input data, and the html renders of all notebooks, is available at Zenodo: [10.5281/zenodo.10694635](https://doi.org/10.5281/zenodo.10694635).
 
-1. Clone the repository:
+## Environment Setup (Cross-Platform)
 
-```bash
-git clone https://github.com/USERNAME/Analysis_with_ProteoForge.git
-cd Analysis_with_ProteoForge
-```
+Use the provided setup scripts to configure both Python (venv) and R (renv + pak). R 4.5.0 or newer is required for the R environment.
 
-1. Setup environments
-
-- Python (recommended): create a venv and install Python requirements
+Linux / macOS (bash):
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+git clone https://github.com/LangeLab/ProteoForge_Analysis.git
+cd ProteoForge_Analysis
+bash setup_project.sh
 ```
 
-- R (for R notebooks / scripts): follow the instructions in `renv/` or run the helper to recreate the R environment:
+Windows (PowerShell):
 
-```r
-# in an R session
-source("setup_env.R")
-# or use renv::restore()
+```powershell
+git clone https://github.com/LangeLab/ProteoForge_Analysis.git
+cd ProteoForge_Analysis
+./setup_project.ps1
 ```
 
-## Running the benchmarks and notebooks
+If R is not on PATH, install it from CRAN and rerun the setup command, or run `Rscript setup_env.R` after installation. To activate the Python environment later, use `source .venv/bin/activate` (Linux/macOS) or `./.venv/Scripts/Activate.ps1` (PowerShell).
 
-- Use the notebooks in `Benchmark/`, `Simulation/` or `NSCLC/` for step-by-step analyses. Rendered HTML files are available under `renders/` for convenience.
-- For scripted runs, `Benchmark/` and `Simulation/` contain R and Python scripts with documented arguments. Many scripts write outputs to `Benchmark/data/results/` or `Simulation/data/`.
+## Run Steps
 
-## Reproducibility notes
+Entry points for reproducing analyses and figures:
 
-- R environments: the `renv/` snapshot lists R package versions used for the R analyses. Use `renv::restore()` inside an R session to recreate the environment.
-- Python environment: `requirements.txt` contains the core Python dependencies. For exact reproducibility, pin versions or use the provided virtual environment creation steps.
-- Data: raw datasets are not committed. Place raw inputs under the appropriate `*/data/input/` folders. Some scripts include download links or instructions to fetch public datasets.
+- Notebooks: `Benchmark/*.ipynb`, `Simulation/*.ipynb`, `NSCLC/*.ipynb`. Rendered HTML versions are under `renders/`.
+- Scripts (Python): `Benchmark/04-runProteoForge.py`, `Simulation/04-runProteoForge.py`.
+- Scripts (R): `Benchmark/01-DataProcessing.R`, `Benchmark/02-runCOPF.R`, `Benchmark/03-runPeCorA.R`, plus analogous scripts in `Simulation/`.
 
-## Citation and license
+Each notebook/script documents its required inputs and outputs. Place raw inputs under the corresponding `*/data/input/` directory before running. Outputs will be written under `*/data/` and `*/figures/`.
 
-This repository is licensed under CC BY-NC 4.0: see [license][cc-by-nc]. If you use these analyses or the ProteoForge code in a publication, please cite the manuscript and repository as indicated in the manuscript.
+## Reproducibility Notes
+
+- R environment: managed with `renv`; run via `setup_project.sh`/`setup_project.ps1` or `Rscript setup_env.R`. Required R version: `>= 4.5.0`.
+- Python environment: `requirements.txt` lists dependencies; the setup scripts create `.venv` and install the requirements.
+- Data locations: inputs are expected under `*/data/input/`; outputs are written to `*/data/` and `*/figures/`. Large files are not tracked in git.
+- Software vs analysis: this repository is the analysis snapshot. The ProteoForge package is developed separately at [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge) (see its README and CITATION for package-specific details).
+
+## Citations
+
+Please cite both the analysis snapshot (this repository) and the ProteoForge software package when applicable.
+
+- Analysis snapshot (this repository): use the Zenodo record and select the version matching the git tag you used.
+    - DOI: [10.5281/zenodo.10694635](https://doi.org/10.5281/zenodo.10694635)
+    - Suggested format (example): “ProteoForge Manuscript Analysis. Version [INSERT VERSION/TAG]. Zenodo. [10.5281/zenodo.10694635](https://doi.org/10.5281/zenodo.10694635).”
+- Software package (ProteoForge): cite the package separately.
+    - Repository: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge)
+    - See the package’s README/CITATION for an up-to-date citation entry and version-specific references.
+- Manuscript: cite the manuscript when referencing results or figures derived from this analysis.
+    - [INSERT FULL MANUSCRIPT REFERENCE/DOI WHEN AVAILABLE]
+
+## License
+
+This repository is licensed under CC BY-NC 4.0: see [license][cc-by-nc].
 
 [![CC BY-NC 4.0][cc-by-nc-image]][cc-by-nc]
 
