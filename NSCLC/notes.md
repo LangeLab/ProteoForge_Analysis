@@ -151,11 +151,11 @@ What I can summarize from the experiment design is as follows:
 | H358_CoCl         | H358      | Chemical Hypoxia (CoCl2)          | 48 or 72 hours    | Positive control to confirm HIF-1α pathway activation.|
 | H358_H2O2         | H358      | Oxidative Stress (H2O2)           | 48 or 72 hours    | Control to study redox changes specifically.          |
 
-### Aim and Hypothesis 🎯
+### Aim and Hypothesis
 
 The primary goal of this experiment was to directly test if hypoxia (low oxygen), a defining characteristic of solid tumors, is a direct cause of the observed impairment in the glyoxalase pathway. This pathway is crucial for detoxifying methylglyoxal (MG), a toxic byproduct of high glycolytic activity in cancer cells. The researchers hypothesized that exposing lung cancer cells to a low-oxygen environment would directly influence the key enzymes of this system, leading to its deactivation.
 
-### Experimental Design & Methods 🔬
+### Experimental Design & Methods
 
 To test their hypothesis, the researchers designed a controlled in vitro experiment using the following methods:
 
@@ -163,12 +163,12 @@ To test their hypothesis, the researchers designed a controlled in vitro experim
 - **Conditions:** Cells were cultured in quadruplicates for either 48 or 72 hours under two different conditions: a standard normoxic environment (21% oxygen) and a hypoxic environment (1% oxygen).
 - **Analysis:** After the incubation period, the cells were harvested, and their proteins and small-molecular thiols were analyzed using mass spectrometry to measure changes in protein abundance and the levels of key metabolites, particularly S-lactoylglutathione (sLG).
 
-### Results and Interpretation 📈
+### Results and Interpretation
 
 The experiment yielded clear results. Cells grown in the 1% oxygen environment showed a significant increase in the levels of sLG , the direct product of the first enzyme in the detoxification pathway, GLO1.
 
 Furthermore, the data revealed a significant inverse correlation between the abundance of well-known hypoxia-inducible proteins (like LDHA and HK2) and the abundance of the GLO2 enzyme. In other words, as the cells adapted to hypoxia, their levels of GLO2 specifically decreased.
 
-### Conclusion 🏁
+### Conclusion
 
 The authors concluded that acute hypoxia directly impacts the glyoxalase system, primarily by downregulating the GLO2 enzyme. The observed buildup of sLG is a direct result of GLO2 being less available to perform its function. This suggests a deliberate adaptation by cancer cells. By allowing the non-toxic intermediate sLG to accumulate rather than completing the detoxification process to D-lactate, the cells can avoid contributing further to the acidic conditions of the tumor microenvironment.

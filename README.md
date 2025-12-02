@@ -4,7 +4,9 @@
 |---|---:|:---:|:---:|:---:|:---:|
 | ![Status](https://img.shields.io/badge/Status-Under_Development-red) | [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc] | ![Language](https://img.shields.io/badge/Language-Python-yellow) | ![Release](https://img.shields.io/badge/Release-v1.0.0-green) | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10694635.svg)](https://doi.org/10.5281/zenodo.10694635) | [![Citation](https://img.shields.io/badge/Citation-ProteoForge_Analysis-lightgrey)](#citations) |
 
-This repository contains the code, analyses, and rendered figures supporting the ProteoForge manuscript. It includes real-data benchmarks, simulation studies, and an application to a hypoxia study. This repo is the analysis snapshot. The ProteoForge software package itself lives at: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge).
+This repository contains the code, analyses, and rendered figures supporting the ProteoForge manuscript. It includes real-data benchmarks, simulation studies, and an application to a hypoxia study. This repo is the analysis snapshot.
+
+> The scripts used here (`ProteoForge`) are not packagized, they are simply collection of functions, however more rounded and complete package version in Python can be found at: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge). This was due to the fact that the analysis and manuscript were developed in parallel with the package, and some features especially plotting and printing functions were added ad-hoc for the manuscript. Please refer to the package repository for package-specific documentation, installation instructions, and citation information.
 
 ## Repository Layout
 
@@ -15,8 +17,9 @@ Top-level folders and their purpose:
 - `NSCLC/` — notebooks, data and figures for the hypoxia/NSCLC application.
 - `Simulation/` — simulation scripts, notebooks and utilities used to evaluate methods.
 - `src/` — auxiliary Python library used by some scripts (utilities, plotting helpers, tests).
-- `renv/` — R environment metadata for reproducing R analyses.
 - `requirements.txt`, `setup_project.sh`, `setup_project.ps1`, `setup_env.R` — environment and setup helpers.
+
+> The setup utilities ensure you have venv and renv folders created with the required dependencies. They setup the environment for both R and Python analyses to facilitate reproducibility across OSes.
 
 Notes on data and outputs:
 
@@ -27,7 +30,7 @@ Notes on data and outputs:
 
 Use the provided setup scripts to configure both Python (venv) and R (renv + pak). R 4.5.0 or newer is required for the R environment.
 
-Linux / macOS (bash):
+**Linux / macOS (bash):**
 
 ```bash
 git clone https://github.com/LangeLab/ProteoForge_Analysis.git
@@ -35,7 +38,7 @@ cd ProteoForge_Analysis
 bash setup_project.sh
 ```
 
-Windows (PowerShell):
+**Windows (PowerShell):**
 
 ```powershell
 git clone https://github.com/LangeLab/ProteoForge_Analysis.git
@@ -49,7 +52,7 @@ If R is not on PATH, install it from CRAN and rerun the setup command, or run `R
 
 Entry points for reproducing analyses and figures:
 
-- Notebooks: `Benchmark/*.ipynb`, `Simulation/*.ipynb`, `NSCLC/*.ipynb`. Rendered HTML versions are under `renders/`.
+- Notebooks: `Benchmark/*.ipynb`, `Simulation/*.ipynb`, `NSCLC/*.ipynb`.
 - Scripts (Python): `Benchmark/04-runProteoForge.py`, `Simulation/04-runProteoForge.py`.
 - Scripts (R): `Benchmark/01-DataProcessing.R`, `Benchmark/02-runCOPF.R`, `Benchmark/03-runPeCorA.R`, plus analogous scripts in `Simulation/`.
 
