@@ -45,9 +45,9 @@ data_ids = ["1pep", "2pep", "050pep", "random"]  # Data IDs to process
 # - 'ols' for ordinary least squares (no weights)
 # - 'wls' for weighted least squares (user-configured weights)
 # - 'glm' for generalized linear model (user-configured weights)
-# Notes: rlm and quantile best for non-imputed data,
-#        wls and glm best for imputed data with user-defined weights
-model_to_use = 'quantile' #
+# Notes: rlm and quantile best for general use with outliers and imputations
+#        wls and glm best for if you have nuanced weights from data
+model_to_use = 'rlm' #
 # Multiple Testing Correction strategy and methods
 # - 'global' correction done after all peptide p-values are calculated
 # - 'protein-only' correction done for peptides within each protein
@@ -264,9 +264,9 @@ for i, data_id in enumerate(data_ids, 1):
         proteins_processed = test_data['protein_id'].nunique()
         peptides_processed = test_data['peptide_id'].nunique()
         
-        print(f"  Performed hierarchical clustering with average linkage")
-        print(f"  Auto-determined optimal number of clusters (1-12 range)")
-        print(f"  Used correlation distance metric with {n_jobs} parallel jobs")
+        print(f"  Performed hierarchical clustering with ward linkage")
+        print(f"  Auto-determined optimal number of clusters (min=1)")
+        print(f"  Used euclidean distance metric with {n_jobs} parallel jobs")
         print(f"  Processed {proteins_processed} proteins with {peptides_processed} peptides")
         print(f"  Time taken: {format_time_diff(time.time() - step_start)}")
         print()

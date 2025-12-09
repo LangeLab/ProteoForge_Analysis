@@ -46,9 +46,9 @@ data_ids = ['Sim1', 'Sim2', 'Sim3', 'Sim4']
 # - 'ols' for ordinary least squares (no weights)
 # - 'wls' for weighted least squares (user-configured weights)
 # - 'glm' for generalized linear model (user-configured weights)
-# Notes: rlm and quantile best for non-imputed data,
-#        wls and glm best for imputed data with user-defined weights
-model_to_use = 'wls' #
+# Notes: rlm and quantile best for general use with outliers and imputations
+#        wls and glm best for if you have nuanced weights from data
+model_to_use = 'rlm' #
 # Multiple Testing Correction strategy and methods
 # - 'global' correction done after all peptide p-values are calculated
 # - 'protein-only' correction done for peptides within each protein

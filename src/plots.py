@@ -2698,3 +2698,361 @@ def clustering_check_with_single_heatmap(
 # ======================================================================================
 # ProteoForge - Protein Annotations 
 # ======================================================================================
+
+#TODO: Following are pretty early crudely built plotting functions for protein annotations.
+
+def annotations_on_protein(
+        target_protein, 
+        control_package, 
+        target_peptide=None
+    ):
+    """
+    Generates a detailed protein coverage plot with UniProt annotations and peptide traces.
+
+    Parameters:
+    -----------
+    target_protein : str
+        The ID of the protein to visualize (e.g., 'P12345').
+    control_package : dict
+        A master dictionary containing all data, styles, and configuration objects.
+        Expected structure:
+            {
+                'data': {
+                    'uniprot': pd.DataFrame,
+                    'detailed': pd.DataFrame,
+                    'summary': pd.DataFrame
+                },
+                'styles': {
+                    'feature_colors': dict,
+                    'dpf_colors': dict,
+                    'category_order': list
+                }
+                'config': {
+                    'is_demo': bool,
+                    'figure_path': str,
+                    'figure_formats': list,
+                    'transparent_bg': bool,
+                    'figure_dpi': int,
+                    'str_add': str
+                }
+            }
+    target_peptide : str, optional
+        ID of a specific peptide to highlight (if needed for future logic).
+    """
+    
+    ## Internal Variables (can be moved to control package later)
+    # Placing the UniProt features into categories
+    feature_categories = {
+        'Protein Processing & Maturation': [
+            'INIT_MET', 'SIGNAL', 'TRANSIT', 
+            'PROPEP', 'CHAIN', 'PEPTIDE', 'CLEAVAGE'
+        ],
+        'Co- & Post-Translational Modifications': [
+            'MOD_RES', 'CARBOHYD', 'LIPID', 
+            'DISULFID', 'CROSSLNK', 'NON_STD'
+        ],
+        'Sequence Heterogeneity & Isoforms': [
+            'VARIANT', 'VAR_SEQ', 'MUTAGEN', 
+            'CONFLICT', 'BREAKPOINT'
+        ],
+        'Functional Domains, Regions & Sites': [
+            'DOMAIN', 'REPEAT', 'ZN_FING', 'MOTIF', 
+            'REGION', 'ACT_SITE', 'BINDING', 'SITE', 
+            'DNA_BIND', 'CA_BIND', 'METAL', 'NP_BIND'
+        ],
+        'Structure & Topology': [
+            'HELIX', 'STRAND', 'TURN', 'COILED', 
+            'TRANSMEM', 'INTRAMEM', 'TOPO_DOM', 'COMPBIAS'
+        ]
+    }
+
+    # Feature category colors for UniProt annotations
+    feature_category_colors = {
+        'Sequence Heterogeneity & Isoforms': '#e74c3c',
+        'Co- & Post-Translational Modifications': '#3498db', 
+        'Protein Processing & Maturation': '#2ecc71',
+        'Structure, Topology & Sequence Characteristics': '#f39c12',
+        'Functional Domains, Regions & Sites': '#9b59b6'
+    }
+
+    # Define FIXED ordering for categories and features for consistency across all proteins
+    CATEGORY_ORDER = [
+        'Sequence Heterogeneity & Isoforms',
+        'Co- & Post-Translational Modifications', 
+        'Protein Processing & Maturation',
+        'Structure, Topology & Sequence Characteristics',
+        'Functional Domains, Regions & Sites'
+    ]
+
+    # 1. UNPACK CONTROL PACKAGE
+    # Use .get() or direct access depending on how strict you want to be
+    dfs = control_package['data']
+    styles = control_package['styles']
+    cfg = control_package['config']
+
+    uniprot_data = dfs['uniprot']
+    test_data = dfs['detailed']
+    summary_data = dfs['summary']
+
+    # 2. FILTER DATA FOR CURRENT PROTEIN
+    # Get UniProt annotations
+    current_uniprot = uniprot_data[uniprot_data['Protein'] == target_protein].copy()
+    
+    # Get detailed peptide data
+    current_detailed = test_data[test_data['Protein'] == target_protein].copy()
+    
+    # Get summary data (contains dPF and trace info)
+    current_summary = summary_data[summary_data['Protein'] == target_protein].copy()
+    
+    if current_summary.empty:
+        print(f"Warning: No summary data found for protein {target_protein}")
+        return
+
+    # 3. SETUP STYLES & METADATA
+    dPF_colors = styles.get('dpf_colors', {})
+
+    # Get protein information
+    cur_seqLength = current_summary['Length'].iloc[0]
+    cur_protein = current_summary['Protein'].iloc[0]
+    cur_description = current_summary['Description'].iloc[0]
+    cur_geneName = current_summary['Gene'].iloc[0]
+    coverage_pct = current_summary['Coverage'].iloc[0] if 'Coverage' in current_summary.columns else 0
+    total_peptides = current_summary['PeptideID'].nunique()
+
+    # 4. CALCULATE DIMENSIONS
+    protein_length = cur_seqLength
+    if protein_length <= 300:
+        fig_width = 10
+    elif protein_length <= 600:
+        fig_width = 15
+    elif protein_length <= 1000:
+        fig_width = 20
+    else:
+        fig_width = 25
+
+    # Calculate figure dimensions based on feature categories and max traces
+    # Handle case where trace might be NaN or missing
+    max_traces = current_summary['trace'].max() if 'trace' in current_summary.columns else 1
+    if pd.isna(max_traces): max_traces = 1
+
+    relevant_categories = []
+    category_feature_counts = {}
+
+    if len(current_uniprot) > 0:
+        # Use FIXED category order - only include categories that have data
+        available_categories = current_uniprot['feature_category'].unique().tolist()
+        relevant_categories = [cat for cat in CATEGORY_ORDER if cat in available_categories]
+        
+        # Calculate number of features per category for dynamic height adjustment
+        for category in relevant_categories:
+            all_features_in_category = []
+            for feat_cat, features in feature_categories.items():
+                if feat_cat == category:
+                    all_features_in_category = features
+                    break
+            category_feature_counts[category] = len(all_features_in_category)
+    else:
+        relevant_categories = []
+
+    n_feature_categories = len(relevant_categories)
+
+    # Calculate heights based on feature counts in each category
+    category_heights = []
+    for category in relevant_categories:
+        feature_count = category_feature_counts.get(category, 1)
+        # Base height + extra height based on number of features
+        height = 1.0 + (feature_count * 0.15) 
+        category_heights.append(height)
+
+    # 5. INITIALIZE FIGURE
+    base_height = 1 
+    total_category_height = sum(category_heights)
+    fig_height = total_category_height + base_height + 5 
+
+    height_ratios = category_heights + [base_height]
+    n_subplots = n_feature_categories + 1
+    
+    fig, axes = plt.subplots(
+        nrows=n_subplots, ncols=1, figsize=(fig_width, fig_height), # using calculated fig_width
+        gridspec_kw={'height_ratios': height_ratios}
+    )
+
+    if n_subplots == 1:
+        axes = [axes]
+
+    # Set consistent x-axis ticks
+    step = max(1, protein_length // 20)
+    positions = range(0, protein_length + 1, step)
+
+    # 6. PLOT FEATURE CATEGORIES (Top Layers)
+    for cat_idx, category in enumerate(relevant_categories):
+        ax_cat = axes[cat_idx]
+        ax_cat.set_xlim(0, protein_length)
+        
+        cat_annotations = current_uniprot[current_uniprot['feature_category'] == category].copy()
+        
+        # Get ALL possible features for this category
+        all_features_in_category = []
+        for feat_cat, features in feature_categories.items():
+            if feat_cat == category:
+                all_features_in_category = features
+                break
+        
+        # Sort and map Y positions
+        all_features_in_category_sorted = sorted(all_features_in_category)
+        y_positions = {feat: i for i, feat in enumerate(all_features_in_category_sorted)}
+        y_max = len(all_features_in_category_sorted)
+        ax_cat.set_ylim(-0.5, y_max + 0.5)
+        
+        category_color = feature_category_colors.get(category, '#7f8c8d')
+        
+        if len(cat_annotations) > 0:
+            cat_annotations = cat_annotations[cat_annotations['feature'].isin(all_features_in_category_sorted)]
+            
+            for _, annotation in cat_annotations.iterrows():
+                start, end = annotation['start'], annotation['end']
+                feature_type = annotation['feature']
+                cleaned_note = annotation['note'] if pd.notna(annotation['note']) else ''
+                
+                if feature_type in y_positions:
+                    y_pos = y_positions[feature_type]
+                    
+                    if start == end:
+                        # Single position marker
+                        ax_cat.axvline(
+                            x=start, ymin=(y_pos-0.3)/(y_max+1), ymax=(y_pos+0.3)/(y_max+1), 
+                            color=category_color, linewidth=4, alpha=0.8
+                        )
+                        ax_cat.scatter(
+                            start, y_pos, s=80, c=category_color, alpha=0.8, 
+                            edgecolors='white', linewidth=1, zorder=5
+                        )
+                    else:
+                        # Range bar
+                        ax_cat.barh(
+                            y_pos, end - start, left=start, height=0.7, 
+                            color=category_color, alpha=0.8, edgecolor='white', linewidth=1
+                        )
+                    
+                    # Labels
+                    feature_width = end - start if end != start else protein_length * 0.02
+                    if feature_width > protein_length * 0.03:
+                        label_text = f"{feature_type}"
+                        if cleaned_note and len(cleaned_note) > 0:
+                            label_text += f"\n{cleaned_note[:20]}{'...' if len(cleaned_note) > 20 else ''}"
+                        
+                        x_pos = start if start == end else start + (end - start)/2
+                        ax_cat.text(
+                            x_pos, y_pos, label_text, 
+                            ha='center', va='center', fontsize=8, fontweight='bold',
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8)
+                        )
+        
+        # Formatting for category axis
+        ax_cat.set_yticks(list(y_positions.values()))
+        ax_cat.set_yticklabels(list(y_positions.keys()), fontsize=9, fontweight='bold')
+        
+        ax_cat.text(0.02, 0.95, category, transform=ax_cat.transAxes, 
+                    fontsize=12, fontweight='bold', color=category_color,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor=category_color),
+                    verticalalignment='top', horizontalalignment='left')
+        
+        ax_cat.set_ylabel('')
+        ax_cat.set_xlabel('')
+        ax_cat.grid(True, alpha=0.4, axis='both', linestyle='-', linewidth=0.5)
+        ax_cat.set_axisbelow(True)
+        ax_cat.set_xticks(positions)
+        ax_cat.set_xticklabels([])
+
+    # 7. PLOT BOTTOM LAYER (Peptides & Protein)
+    ax_combined = axes[-1]
+    ax_combined.set_xlim(0, protein_length)
+
+    y_min = -1.8 
+    y_max_combined = max_traces + 0.3 
+    ax_combined.set_ylim(y_min, y_max_combined)
+
+    # Protein Rectangle
+    protein_height = 1.0 
+    ax_combined.barh(-0.9, protein_length, height=protein_height, color='#34495e', alpha=0.8, edgecolor='white', linewidth=2)
+
+    protein_text = f'{cur_geneName} ({cur_protein}) - {cur_description[:40]}{"..." if len(cur_description) > 40 else ""}\n{protein_length} AA | Coverage: {coverage_pct:.1f}%'
+    ax_combined.text(protein_length/2, -0.9, protein_text, 
+                    ha='center', va='center', fontsize=10, fontweight='bold', color='white',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='#34495e', alpha=0.9, edgecolor='white'))
+
+    # Peptide Traces
+    for _, peptide in current_summary.iterrows():
+        start, end = peptide['peptide_start'], peptide['peptide_end']
+        trace = peptide['trace']
+        dpf = peptide['dPF']
+        is_sig = peptide['isSignificant']
+        peptide_id = peptide['PeptideID']
+        
+        # Highlight logic (if current_peptide passed in args matches)
+        is_target_peptide = (target_peptide is not None) and (peptide_id == target_peptide)
+        
+        color = dPF_colors.get(dpf, '#7f8c8d')
+        
+        height = 0.85 if is_sig else 0.7 
+        alpha = 0.9 if is_sig else 0.7
+        edge_color = 'red' if is_target_peptide else 'white' # Example highlight logic
+        line_width = 2.5 if is_target_peptide else 1
+        
+        y_position = trace * 0.9
+        
+        ax_combined.barh(y_position, end - start, left=start, height=height, 
+                        color=color, alpha=alpha, edgecolor=edge_color, linewidth=line_width)
+        
+        label = f"{peptide_id}{'*' if is_sig else ''}"
+        font_weight = 'bold' if is_sig else 'normal'
+        
+        ax_combined.text(start + (end - start)/2, y_position, label, 
+                        ha='center', va='center', fontsize=9, fontweight=font_weight, color='black')
+
+    # Legend
+    legend_elements = [
+        plt.Rectangle((0,0),1,1, facecolor=color, alpha=0.8, label=f'dPF={dpf}' if dpf >= 0 else 'PTM') 
+            for dpf, color in dPF_colors.items() if dpf in current_summary['dPF'].values
+    ]
+    if legend_elements:
+        ax_combined.legend(handles=legend_elements, loc='upper right', fontsize=9, title='dPF Categories')
+
+    # Y-Axis Formatting
+    y_tick_positions = [-0.9] + [i * 0.9 for i in range(int(max_traces) + 1)]
+    ax_combined.set_yticks(y_tick_positions)
+    y_labels = ['Protein'] + ['' for _ in range(int(max_traces) + 1)] 
+    ax_combined.set_yticklabels(y_labels, fontsize=9, fontweight='bold')
+
+    ax_combined.set_xlabel('Protein Position (AA)', fontsize=12, fontweight='bold')
+    ax_combined.grid(True, alpha=0.4, axis='both', linestyle='-', linewidth=0.5)
+    ax_combined.set_axisbelow(True)
+    ax_combined.set_ylabel('Peptides & Protein', fontsize=12, fontweight='bold', rotation=90)
+
+    # X-Axis Formatting
+    ax_combined.set_xticks(positions)
+    ax_combined.set_xticklabels(positions, fontsize=10)
+
+    # 8. FINALIZE AND SAVE
+    fig.suptitle(
+        f'{cur_geneName} ({cur_protein}) - {cur_description}\n'
+        f'Length: {cur_seqLength} AA | Coverage: {coverage_pct:.1f}% | Peptides: {total_peptides}',
+        fontsize=16, fontweight='bold', y=0.98
+    )
+
+    plt.subplots_adjust(left=0.15, right=0.95, top=0.94, bottom=0.08, hspace=0.05)
+    
+    str_add = cfg.get("str_add", "")
+    if str_add:
+        str_add = f"_{str_add}"
+
+    finalize_plot( 
+        fig, 
+        show=True, 
+        save=not cfg.get('is_demo', False), 
+        filename=f'protein_overview_{cur_geneName}{str_add}',
+        filepath=cfg.get('figure_path', './figures'),
+        formats=cfg.get('figure_formats', ['png']),
+        transparent=cfg.get('transparent_bg', False),
+        dpi=cfg.get('figure_dpi', 300)
+    )

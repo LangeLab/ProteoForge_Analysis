@@ -2,7 +2,7 @@
 
 | **`Status`** | **`License`** | **`Language`** | **`Release`** | **`Zenodo`** | **`Citation`** |
 |---|---:|:---:|:---:|:---:|:---:|
-| ![Status](https://img.shields.io/badge/Status-Under_Development-red) | [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc] | ![Language](https://img.shields.io/badge/Language-Python-yellow) | ![Release](https://img.shields.io/badge/Release-v1.0.0-green) | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10694635.svg)](https://doi.org/10.5281/zenodo.10694635) | [![Citation](https://img.shields.io/badge/Citation-ProteoForge_Analysis-lightgrey)](#citations) |
+| ![Status](https://img.shields.io/badge/Status-Under_Development-red) | [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc] | ![Language](https://img.shields.io/badge/Language-Python-yellow) | ![Release](https://img.shields.io/badge/Release-v1.0.0-green) | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17795845.svg)](https://doi.org/10.5281/zenodo.17795845) | [![Citation](https://img.shields.io/badge/Citation-ProteoForge_Analysis-lightgrey)](#citations) |
 
 This repository contains the code, analyses, and rendered figures supporting the ProteoForge manuscript. It includes real-data benchmarks, simulation studies, and an application to a hypoxia study. This repo is the analysis snapshot.
 
@@ -24,7 +24,7 @@ Top-level folders and their purpose:
 Notes on data and outputs:
 
 - Raw and derived data/figures are not committed. Place raw inputs under the appropriate `*/data/input/` folders; scripts/notebooks will write to `*/data/` and `*/figures/` (see folder READMEs).
-- A snapshot of the repository with input data, and the html renders of all notebooks, is available at Zenodo: [10.5281/zenodo.10694635](https://doi.org/10.5281/zenodo.10694635).
+- A snapshot of the repository with input data, and the html renders of all notebooks, is available at Zenodo: [10.5281/zenodo.17795845](https://doi.org/10.5281/zenodo.17795845).
 
 ## Environment Setup (Cross-Platform)
 
@@ -70,11 +70,9 @@ Each notebook/script documents its required inputs and outputs. Place raw inputs
 Please cite both the analysis snapshot (this repository) and the ProteoForge software package when applicable.
 
 - Analysis snapshot (this repository): use the Zenodo record and select the version matching the git tag you used.
-    - DOI: [10.5281/zenodo.10694635](https://doi.org/10.5281/zenodo.10694635)
-    - Suggested format (example): “ProteoForge Manuscript Analysis. Version [INSERT VERSION/TAG]. Zenodo. [10.5281/zenodo.10694635](https://doi.org/10.5281/zenodo.10694635).”
+    - “Snapshot of Benchmarking and Showcasing ProteoForge for Proteoform Deconvolution from Peptide Level Data. Version 1. Zenodo. [10.5281/zenodo.17795845](https://doi.org/10.5281/zenodo.17795845).”
 - Software package (ProteoForge): cite the package separately.
     - Repository: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge)
-    - See the package’s README/CITATION for an up-to-date citation entry and version-specific references.
 - Manuscript: cite the manuscript when referencing results or figures derived from this analysis.
     - [INSERT FULL MANUSCRIPT REFERENCE/DOI WHEN AVAILABLE]
 
