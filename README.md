@@ -6,7 +6,7 @@
 
 This repository contains the code, analyses, and rendered figures supporting the ProteoForge manuscript. It includes real-data benchmarks, simulation studies, and an application to a hypoxia study. This repo is the analysis snapshot.
 
-> The scripts used here (`ProteoForge`) are not packagized, they are simply collection of functions, however more rounded and complete package version in Python can be found at: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge). This was due to the fact that the analysis and manuscript were developed in parallel with the package, and some features especially plotting and printing functions were added ad-hoc for the manuscript. Please refer to the package repository for package-specific documentation, installation instructions, and citation information.
+> The scripts used here (`ProteoForge`) are not packaged; they are simply a collection of functions. However, a more rounded and complete package version in Python can be found at: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge). This was because the analysis and manuscript were developed in parallel with the package, and some features, especially plotting and printing functions, were added ad hoc for the manuscript. Please refer to the package repository for package-specific documentation, installation instructions, and citation information.
 
 ## Repository Layout
 
@@ -85,3 +85,4 @@ This repository is licensed under CC BY-NC 4.0: see [license][cc-by-nc].
 [cc-by-nc]: https://creativecommons.org/licenses/by-nc/4.0/
 [cc-by-nc-image]: https://licensebuttons.net/l/by-nc/4.0/88x31.png
 [cc-by-nc-shield]: https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg
+
