@@ -1,12 +1,12 @@
 # ProteoForge Manuscript Analysis
 
-| **`Status`** | **`License`** | **`Language`** | **`Release`** | **`Zenodo`** | **`Citation`** |
-|---|---:|:---:|:---:|:---:|:---:|
-| ![Status](https://img.shields.io/badge/Status-Under_Development-red) | [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc] | ![Language](https://img.shields.io/badge/Language-Python-yellow) | ![Release](https://img.shields.io/badge/Release-v1.0.0-green) | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17795845.svg)](https://doi.org/10.5281/zenodo.17795845) | [![Citation](https://img.shields.io/badge/Citation-ProteoForge_Analysis-lightgrey)](#citations) |
+| **`Status`**                                                       |                                **`License`** |                          **`Language`**                          |                         **`Release`**                         |                                                      **`Zenodo`**                                                      |                                                                **`Citation`**                                                                 |
+| ------------------------------------------------------------------ | -------------------------------------------: | :--------------------------------------------------------------: | :-----------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------: |
+| ![Status](https://img.shields.io/badge/Status-Under_Review-orange) | [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc] | ![Language](https://img.shields.io/badge/Language-Python-yellow) | ![Release](https://img.shields.io/badge/Release-v1.0.0-green) | [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.17795845-blue.svg)](https://doi.org/10.5281/zenodo.17795845) | [![bioRxiv](https://img.shields.io/badge/bioRxiv-2025.12.12.694008-b31b1b.svg)](https://www.biorxiv.org/content/10.64898/2025.12.12.694008v1) |
 
 This repository contains the code, analyses, and rendered figures supporting the ProteoForge manuscript. It includes real-data benchmarks, simulation studies, and an application to a hypoxia study. This repo is the analysis snapshot.
 
-> The scripts used here (`ProteoForge`) are not packaged; they are simply a collection of functions. However, a more rounded and complete package version in Python can be found at: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge). This was because the analysis and manuscript were developed in parallel with the package, and some features, especially plotting and printing functions, were added ad hoc for the manuscript. Please refer to the package repository for package-specific documentation, installation instructions, and citation information.
+> The scripts used here (`ProteoForge/`) are not packaged; they are simply a collection of functions developed alongside the manuscript. Some features — especially plotting and printing helpers — were added ad hoc and are specific to this analysis. A standalone Python package implementing the ProteoForge methodology is currently under development and will be made publicly available upon stable release.
 
 ## Repository Layout
 
@@ -63,18 +63,16 @@ Each notebook/script documents its required inputs and outputs. Place raw inputs
 - R environment: managed with `renv`; run via `setup_project.sh`/`setup_project.ps1` or `Rscript setup_env.R`. Required R version: `>= 4.5.0`.
 - Python environment: `requirements.txt` lists dependencies; the setup scripts create `.venv` and install the requirements.
 - Data locations: inputs are expected under `*/data/input/`; outputs are written to `*/data/` and `*/figures/`. Large files are not tracked in git.
-- Software vs analysis: this repository is the analysis snapshot. The ProteoForge package is developed separately at [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge) (see its README and CITATION for package-specific details).
+- Software vs analysis: this repository is the analysis snapshot. A standalone Python package is under development and will be made publicly available upon stable release.
 
 ## Citations
 
-Please cite both the analysis snapshot (this repository) and the ProteoForge software package when applicable.
+Please cite the manuscript and the analysis snapshot when using this work.
 
+- Manuscript (preprint):
+    - [ProteoForge: An Imputation-Aware Framework for Differential Proteoform Discovery in Bottom-Up Proteomics](https://www.biorxiv.org/content/10.64898/2025.12.12.694008v1). _bioRxiv_. Posted December 16, 2025. _(under review)_
 - Analysis snapshot (this repository): use the Zenodo record and select the version matching the git tag you used.
-    - “Snapshot of Benchmarking and Showcasing ProteoForge for Proteoform Deconvolution from Peptide Level Data. Version 1. Zenodo. [10.5281/zenodo.17795845](https://doi.org/10.5281/zenodo.17795845).”
-- Software package (ProteoForge): cite the package separately.
-    - Repository: [LangeLab/ProteoForge](https://github.com/LangeLab/ProteoForge)
-- Manuscript: cite the manuscript when referencing results or figures derived from this analysis.
-    - [INSERT FULL MANUSCRIPT REFERENCE/DOI WHEN AVAILABLE]
+    - "Snapshot of Benchmarking and Showcasing ProteoForge for Proteoform Deconvolution from Peptide Level Data. Version 1. Zenodo. [10.5281/zenodo.17795845](https://doi.org/10.5281/zenodo.17795845)."
 
 ## License
 
@@ -85,4 +83,3 @@ This repository is licensed under CC BY-NC 4.0: see [license][cc-by-nc].
 [cc-by-nc]: https://creativecommons.org/licenses/by-nc/4.0/
 [cc-by-nc-image]: https://licensebuttons.net/l/by-nc/4.0/88x31.png
 [cc-by-nc-shield]: https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg
-
