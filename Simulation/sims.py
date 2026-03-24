@@ -497,12 +497,13 @@ def generate_complete_data(
     else:
         input_data = data.values
 
-    # Create a shift matrix  shifts x data.shape[0]
-    # Uses the shift as mean and shift_scale as std to generate the shifts
+    # Create a shift matrix — condition shifts applied to each row
+    shift_locs = np.array(list(condition_shifts.values()))
+    n_conds = len(condition_shifts)
+
     shift_matrix = np.random.normal(
-        loc=np.array(list(condition_shifts.values())), 
-        scale=shift_scale, 
-        size=(input_data.shape[0], len(condition_shifts))
+        loc=shift_locs, scale=shift_scale,
+        size=(input_data.shape[0], n_conds)
     )
 
     # Create the complete data matrix
@@ -978,29 +979,45 @@ def downshifted_imputation(
     elif seed == -1: np.random.seed()
 
     # Convert the data to log2 scale if needed
-    if not is_log2:
-        imputed_data = np.log2(data).copy()
+    imputed_data = data.copy() if is_log2 else np.log2(data).copy()
 
     # Imputation loop (Updated with vectorization)
     for k, v in condition_sample_map.items():
-        isMiss = imputed_data[v].isna()
-        
-        sd = imputed_data[v].dropna(how="all").std(axis=1)
-        
-        if impute_all:
-            # Impute all missing values
-            anyMiss = isMiss.sum(axis=1) > 0
-            sdDist = np.random.choice(sd, size=anyMiss.sum(), replace=True)
-            means = calculate_downshift(imputed_data[v], shiftMag, lowPct).mean()
-            imputed_values = np.random.normal(means, sdDist[:, np.newaxis], (anyMiss.sum(), len(v)))
-            imputed_data.loc[anyMiss, v] = imputed_values
+        cond_data = imputed_data[v]
+        isMiss = cond_data.isna()
+
+        row_sd = cond_data.std(axis=1, skipna=True)
+        sd_pool = row_sd[np.isfinite(row_sd) & (row_sd > 0)]
+        if len(sd_pool) == 0:
+            fallback_sd = np.nanstd(cond_data.to_numpy())
+            if not np.isfinite(fallback_sd) or fallback_sd <= 0:
+                fallback_sd = 1.0
+            sd_pool = pd.Series([fallback_sd])
         else:
-            # Impute only completely missing values
-            fullMiss = isMiss.sum(axis=1) == len(v)
-            sdDist = np.random.choice(sd, size=fullMiss.sum(), replace=True)
-            means = calculate_downshift(imputed_data[v], shiftMag, lowPct).mean()
-            imputed_values = np.random.normal(means, sdDist[:, np.newaxis], (fullMiss.sum(), len(v)))
-            imputed_data.loc[fullMiss, v] = imputed_values
+            fallback_sd = float(np.nanmedian(sd_pool))
+
+        target_rows = isMiss.any(axis=1) if impute_all else isMiss.all(axis=1)
+        if not target_rows.any():
+            continue
+
+        means = calculate_downshift(cond_data, shiftMag, lowPct).mean()
+        if not np.isfinite(means):
+            means = np.nanmean(cond_data.to_numpy())
+        if not np.isfinite(means):
+            means = 0.0
+
+        for row_idx in imputed_data.index[target_rows]:
+            missing_cols = isMiss.columns[isMiss.loc[row_idx]] if impute_all else pd.Index(v)
+            n_missing = len(missing_cols)
+            if n_missing == 0:
+                continue
+
+            cur_sd = float(np.random.choice(sd_pool.to_numpy(), size=1)[0])
+            if not np.isfinite(cur_sd) or cur_sd <= 0:
+                cur_sd = fallback_sd
+
+            imputed_values = np.random.normal(means, cur_sd, size=n_missing)
+            imputed_data.loc[row_idx, list(missing_cols)] = imputed_values
 
     if not is_log2:
         imputed_data = np.power(2, imputed_data)
@@ -1150,19 +1167,29 @@ def build_test_data(
     )
 
     # Data to be Build for the perturbation
-    info_data = pd.DataFrame(perturbation_map).T
-    info_data = assign_groups_based_on_perturbation(
-        info_data,
-        protein_col="Protein",
-        peptide_col="Peptide",
-        condition_col="pertCondition",
-        shift_col="pertShift",
-        pertPFG_col="pertPFG"
-    ).reindex(data.index).reset_index()
-    info_data['pertPFG'] = info_data['pertPFG'].fillna(-1).astype(int)
-    info_data['pertPeptide'] = info_data['pertShift'].notnull()
-    info_data['pertProtein'] = info_data['Protein'].isin(proteins_to_perturb)
-    info_data['Reason'] = "Perturbation"
+    if not perturbation_map:
+        # Null simulation: no perturbations — build info_data directly
+        info_data = data.reset_index()[['Protein', 'Peptide']].copy()
+        info_data['pertPFG']      = -1
+        info_data['pertShift']    = None
+        info_data['pertCondition']= None
+        info_data['pertPeptide']  = False
+        info_data['pertProtein']  = False
+        info_data['Reason']       = None
+    else:
+        info_data = pd.DataFrame(perturbation_map).T
+        info_data = assign_groups_based_on_perturbation(
+            info_data,
+            protein_col="Protein",
+            peptide_col="Peptide",
+            condition_col="pertCondition",
+            shift_col="pertShift",
+            pertPFG_col="pertPFG"
+        ).reindex(data.index).reset_index()
+        info_data['pertPFG'] = info_data['pertPFG'].fillna(-1).astype(int)
+        info_data['pertPeptide'] = info_data['pertShift'].notnull()
+        info_data['pertProtein'] = info_data['Protein'].isin(proteins_to_perturb)
+        info_data['Reason'] = "Perturbation"
 
     # Combine the data for the perturbation
     test_data = test_data.merge(

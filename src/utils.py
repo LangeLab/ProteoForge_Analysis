@@ -6,7 +6,8 @@ from typing import Any, Callable, Dict, List, Union
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import matthews_corrcoef
+from scipy import stats as _scipy_stats
+from sklearn.metrics import matthews_corrcoef, roc_curve, roc_auc_score
 from sklearn.preprocessing import minmax_scale
 
 # ======================================================================================
@@ -1094,3 +1095,487 @@ def grouping_performance_copf(
 
     metrics_data = pd.DataFrame(metrics_data)
     return metrics_data
+
+
+# ======================================================================================
+# Statistical Uncertainty Quantification
+# ======================================================================================
+
+def _placement_values(y_true: np.ndarray, y_scores: np.ndarray):
+    """
+    Compute DeLong placement values (structural components) for AUROC.
+
+    For m positives and n negatives:
+      V10[i] = fraction of negatives correctly ranked below positive i
+      V01[j] = fraction of positives correctly ranked above negative j
+    AUROC = mean(V10) = mean(V01)
+
+    Args:
+        y_true: integer array (1 = positive, 0 = negative).
+        y_scores: float array (higher value = more likely positive).
+
+    Returns:
+        V10: (m,) placement values for each positive sample.
+        V01: (n,) placement values for each negative sample.
+        auroc: scalar AUROC estimate.
+    """
+    pos = y_scores[y_true == 1]
+    neg = y_scores[y_true == 0]
+
+    # Vectorised: diff[i, j] = pos[i] - neg[j]  (m × n)
+    diff = pos[:, np.newaxis] - neg[np.newaxis, :]
+    S = (diff > 0).astype(float) + 0.5 * (diff == 0).astype(float)
+
+    V10 = S.mean(axis=1)   # (m,)
+    V01 = S.mean(axis=0)   # (n,)
+    auroc = float(V10.mean())
+    return V10, V01, auroc
+
+
+def delong_auroc_ci(
+        y_true,
+        y_pval,
+        alpha: float = 0.05,
+) -> dict:
+    """
+    Compute AUROC and confidence interval using the DeLong (1988) method.
+
+    Uses the logit transform for the confidence interval so that limits stay
+    in [0, 1] even for nearly perfect classifiers.
+
+    Args:
+        y_true: binary array-like (1 / True = positive / perturbed).
+        y_pval: p-value array-like. Internally negated so that lower p-value
+                maps to a higher "score" (more likely positive).
+        alpha:  significance level (default 0.05 → 95 % CI).
+
+    Returns:
+        dict with keys 'AUROC', 'CI_lower', 'CI_upper', 'SE'.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_scores = -np.asarray(y_pval, dtype=float)   # negate so higher = more positive
+    mask = np.isfinite(y_scores)
+    y_true, y_scores = y_true[mask], y_scores[mask]
+
+    m = int((y_true == 1).sum())
+    n = int((y_true == 0).sum())
+
+    if m == 0 or n == 0:
+        return {'AUROC': np.nan, 'CI_lower': np.nan, 'CI_upper': np.nan, 'SE': np.nan}
+
+    V10, V01, auroc = _placement_values(y_true, y_scores)
+
+    # DeLong variance (Eq. 5 in DeLong et al. 1988)
+    s10_sq = float(np.var(V10, ddof=1)) if m > 1 else 0.0
+    s01_sq = float(np.var(V01, ddof=1)) if n > 1 else 0.0
+    se = float(np.sqrt(s10_sq / m + s01_sq / n))
+
+    z = float(_scipy_stats.norm.ppf(1.0 - alpha / 2.0))
+
+    # Logit-scale CI for better coverage near 0 and 1
+    if se > 0.0 and 0.0 < auroc < 1.0:
+        logit_auc = np.log(auroc / (1.0 - auroc))
+        logit_se = se / (auroc * (1.0 - auroc))
+        ci_lo = float(1.0 / (1.0 + np.exp(-(logit_auc - z * logit_se))))
+        ci_hi = float(1.0 / (1.0 + np.exp(-(logit_auc + z * logit_se))))
+    else:
+        ci_lo = float(np.clip(auroc - z * se, 0.0, 1.0))
+        ci_hi = float(np.clip(auroc + z * se, 0.0, 1.0))
+
+    return {'AUROC': auroc, 'CI_lower': ci_lo, 'CI_upper': ci_hi, 'SE': se}
+
+
+def delong_test(y_true, pval_a, pval_b) -> dict:
+    """
+    DeLong test for comparing two correlated ROC curves on the same test set.
+
+    Tests H₀: AUROC_A = AUROC_B (two-tailed). Accounts for the correlation
+    arising from the shared set of test samples (DeLong et al. 1988).
+
+    Args:
+        y_true: binary array-like (1 = positive).
+        pval_a: p-values for method A (lower = more likely positive).
+        pval_b: p-values for method B (lower = more likely positive).
+
+    Returns:
+        dict with 'statistic' (Z), 'pvalue', 'AUROC_A', 'AUROC_B', 'delta'.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    scores_a = -np.asarray(pval_a, dtype=float)
+    scores_b = -np.asarray(pval_b, dtype=float)
+
+    _nan_result = {
+        'statistic': np.nan, 'pvalue': np.nan,
+        'AUROC_A': np.nan, 'AUROC_B': np.nan, 'delta': np.nan,
+    }
+    if len(y_true) != len(scores_a) or len(y_true) != len(scores_b):
+        return _nan_result
+
+    mask = np.isfinite(scores_a) & np.isfinite(scores_b)
+    y_true, scores_a, scores_b = y_true[mask], scores_a[mask], scores_b[mask]
+
+    m = int((y_true == 1).sum())
+    n = int((y_true == 0).sum())
+
+    if m == 0 or n == 0:
+        return {
+            'statistic': np.nan, 'pvalue': np.nan,
+            'AUROC_A': np.nan, 'AUROC_B': np.nan, 'delta': np.nan,
+        }
+
+    V10_a, V01_a, auroc_a = _placement_values(y_true, scores_a)
+    V10_b, V01_b, auroc_b = _placement_values(y_true, scores_b)
+
+    # Individual variances
+    s10_a = float(np.var(V10_a, ddof=1)) if m > 1 else 0.0
+    s01_a = float(np.var(V01_a, ddof=1)) if n > 1 else 0.0
+    s10_b = float(np.var(V10_b, ddof=1)) if m > 1 else 0.0
+    s01_b = float(np.var(V01_b, ddof=1)) if n > 1 else 0.0
+
+    # Cross-covariances (shared test set → correlated)
+    cov10 = float(np.cov(V10_a, V10_b, ddof=1)[0, 1]) if m > 1 else 0.0
+    cov01 = float(np.cov(V01_a, V01_b, ddof=1)[0, 1]) if n > 1 else 0.0
+
+    # Variance of the difference θ_A - θ_B
+    var_diff = (
+        (s10_a / m + s01_a / n)
+        + (s10_b / m + s01_b / n)
+        - 2.0 * (cov10 / m + cov01 / n)
+    )
+    se_diff = float(np.sqrt(max(var_diff, 0.0)))
+
+    delta = auroc_a - auroc_b
+    z_stat = delta / se_diff if se_diff > 0.0 else 0.0
+    pvalue = float(2.0 * _scipy_stats.norm.sf(abs(z_stat)))
+
+    return {
+        'statistic': z_stat,
+        'pvalue': pvalue,
+        'AUROC_A': auroc_a,
+        'AUROC_B': auroc_b,
+        'delta': delta,
+    }
+
+
+def bootstrap_auroc_ci(
+        y_true,
+        y_pval,
+        n_bootstrap: int = 1000,
+        seed: int = 42,
+        alpha: float = 0.05,
+) -> dict:
+    """
+    Bootstrap 95 % CI for AUROC using 1 000 resamples (percentile method).
+
+    Args:
+        y_true:      binary array-like (1 = positive / perturbed).
+        y_pval:      p-values (lower = more likely positive; internally negated).
+        n_bootstrap: number of bootstrap resamples (default 1 000).
+        seed:        random seed for reproducibility.
+        alpha:       significance level (default 0.05).
+
+    Returns:
+        dict with 'AUROC', 'CI_lower', 'CI_upper'.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_scores = -np.asarray(y_pval, dtype=float)
+    mask = np.isfinite(y_scores)
+    y_true, y_scores = y_true[mask], y_scores[mask]
+    n = len(y_true)
+    rng = np.random.default_rng(seed)
+
+    if (y_true == 1).sum() == 0 or (y_true == 0).sum() == 0:
+        return {'AUROC': np.nan, 'CI_lower': np.nan, 'CI_upper': np.nan}
+
+    auroc_point = float(roc_auc_score(y_true, y_scores))
+
+    boot_aucs = np.empty(n_bootstrap)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        yt = y_true[idx]
+        ys = y_scores[idx]
+        if (yt == 1).sum() == 0 or (yt == 0).sum() == 0:
+            boot_aucs[b] = np.nan
+        else:
+            boot_aucs[b] = roc_auc_score(yt, ys)
+
+    valid = boot_aucs[~np.isnan(boot_aucs)]
+    ci_lo = float(np.percentile(valid, 100.0 * alpha / 2.0)) if len(valid) else np.nan
+    ci_hi = float(np.percentile(valid, 100.0 * (1.0 - alpha / 2.0))) if len(valid) else np.nan
+
+    return {'AUROC': auroc_point, 'CI_lower': ci_lo, 'CI_upper': ci_hi}
+
+
+def bootstrap_mcc_ci(
+        y_true,
+        y_pval,
+        threshold: float,
+        n_bootstrap: int = 1000,
+        seed: int = 42,
+        alpha: float = 0.05,
+) -> dict:
+    """
+    Bootstrap 95 % CI for MCC at a fixed p-value threshold.
+
+    Args:
+        y_true:      binary array-like (1 = positive / perturbed).
+        y_pval:      p-values (predict positive when pval ≤ threshold).
+        threshold:   p-value cutoff.
+        n_bootstrap: number of bootstrap resamples (default 1 000).
+        seed:        random seed.
+        alpha:       significance level (default 0.05).
+
+    Returns:
+        dict with 'MCC', 'CI_lower', 'CI_upper'.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_pval = np.asarray(y_pval, dtype=float)
+    mask = np.isfinite(y_pval)
+    y_true, y_pval = y_true[mask], y_pval[mask]
+    n = len(y_true)
+    rng = np.random.default_rng(seed)
+
+    y_pred = y_pval <= threshold
+    mcc_point = (
+        float(matthews_corrcoef(y_true, y_pred))
+        if len(np.unique(y_true)) > 1
+        else np.nan
+    )
+
+    boot_mcc = np.empty(n_bootstrap)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        yt = y_true[idx]
+        yp = y_pval[idx] <= threshold
+        boot_mcc[b] = (
+            float(matthews_corrcoef(yt, yp))
+            if len(np.unique(yt)) > 1
+            else np.nan
+        )
+
+    valid = boot_mcc[~np.isnan(boot_mcc)]
+    if len(valid) == 0:
+        return {'MCC': mcc_point, 'CI_lower': np.nan, 'CI_upper': np.nan}
+
+    ci_lo = float(np.percentile(valid, 100.0 * alpha / 2.0))
+    ci_hi = float(np.percentile(valid, 100.0 * (1.0 - alpha / 2.0)))
+    return {'MCC': mcc_point, 'CI_lower': ci_lo, 'CI_upper': ci_hi}
+
+
+def bootstrap_max_mcc_ci(
+        y_true,
+        y_pval,
+        thresholds,
+        n_bootstrap: int = 1000,
+        seed: int = 42,
+        alpha: float = 0.05,
+) -> dict:
+    """
+    Bootstrap 95 % CI for the maximum MCC achievable across a set of thresholds.
+
+    Uses a fully vectorised confusion-matrix calculation (no sklearn per iteration)
+    for efficiency.
+
+    Args:
+        y_true:      binary array-like (1 = positive / perturbed).
+        y_pval:      p-values (lower = more likely positive).
+        thresholds:  iterable of p-value thresholds to sweep.
+        n_bootstrap: number of bootstrap resamples (default 1 000).
+        seed:        random seed.
+        alpha:       significance level (default 0.05).
+
+    Returns:
+        dict with 'Max_MCC', 'CI_lower', 'CI_upper'.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_pval = np.asarray(y_pval, dtype=float)
+    mask = np.isfinite(y_pval)
+    y_true, y_pval = y_true[mask], y_pval[mask]
+    thr_arr = np.asarray(sorted(thresholds), dtype=float)  # (T,)
+    n = len(y_true)
+    rng = np.random.default_rng(seed)
+
+    def _max_mcc_vec(yt: np.ndarray, yp: np.ndarray) -> float:
+        # Broadcast: y_pred[i, t] = (yp[i] <= thr_arr[t])
+        y_pred_all = yp[:, np.newaxis] <= thr_arr[np.newaxis, :]  # (n, T)
+        pos = (yt == 1)[:, np.newaxis]
+        neg = (yt == 0)[:, np.newaxis]
+        TP = (pos & y_pred_all).sum(axis=0).astype(float)
+        FP = (neg & y_pred_all).sum(axis=0).astype(float)
+        TN = (neg & ~y_pred_all).sum(axis=0).astype(float)
+        FN = (pos & ~y_pred_all).sum(axis=0).astype(float)
+        num = TP * TN - FP * FN
+        den = np.sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
+        with np.errstate(invalid='ignore', divide='ignore'):
+            mcc_arr = np.where(den > 0.0, num / den, 0.0)
+        return float(mcc_arr.max())
+
+    mcc_point = _max_mcc_vec(y_true, y_pval)
+
+    boot_mcc = np.empty(n_bootstrap)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        yt = y_true[idx]
+        yp = y_pval[idx]
+        boot_mcc[b] = (
+            _max_mcc_vec(yt, yp)
+            if len(np.unique(yt)) > 1
+            else np.nan
+        )
+
+    valid = boot_mcc[~np.isnan(boot_mcc)]
+    ci_lo = float(np.percentile(valid, 100.0 * alpha / 2.0)) if len(valid) else np.nan
+    ci_hi = float(np.percentile(valid, 100.0 * (1.0 - alpha / 2.0))) if len(valid) else np.nan
+
+    return {'Max_MCC': mcc_point, 'CI_lower': ci_lo, 'CI_upper': ci_hi}
+
+
+def evaluate_at_fixed_fpr(y_true, y_pval, target_fpr: float = 0.05) -> dict:
+    """
+    Evaluate Sensitivity, Specificity, and Precision at a fixed FPR operating point.
+
+    Sensitivity (TPR) is linearly interpolated from the full ROC curve at
+    ``target_fpr``. Specificity and Precision are computed at the nearest
+    realised threshold (largest threshold whose empirical FPR ≤ target_fpr).
+
+    Args:
+        y_true:     binary array-like (1 = positive / perturbed).
+        y_pval:     p-values (lower = more likely positive; internally negated).
+        target_fpr: desired false positive rate (default 0.05 = 5 %).
+
+    Returns:
+        dict with 'Sensitivity', 'Specificity', 'Precision', 'ActualFPR',
+        'Threshold'.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_pval = np.asarray(y_pval, dtype=float)
+    mask = np.isfinite(y_pval)
+    y_true, y_pval = y_true[mask], y_pval[mask]
+    y_scores = -y_pval
+
+    if len(np.unique(y_true)) < 2:
+        return {
+            'Sensitivity': np.nan, 'Specificity': np.nan,
+            'Precision': np.nan, 'ActualFPR': np.nan, 'Threshold': np.nan,
+        }
+
+    fpr_arr, tpr_arr, thr_arr = roc_curve(y_true, y_scores)
+
+    # Linearly interpolated sensitivity at the exact target_fpr
+    sensitivity = float(np.interp(target_fpr, fpr_arr, tpr_arr))
+
+    # Most conservative threshold whose FPR does not exceed target_fpr
+    idx = int(np.clip(
+        np.searchsorted(fpr_arr, target_fpr, side='right') - 1,
+        0, len(thr_arr) - 1,
+    ))
+    thr_pval = float(-thr_arr[idx])
+
+    y_pred = y_pval <= thr_pval
+    TP = int(((y_true == 1) & y_pred).sum())
+    FP = int(((y_true == 0) & y_pred).sum())
+    TN = int(((y_true == 0) & ~y_pred).sum())
+    FN = int(((y_true == 1) & ~y_pred).sum())
+
+    specificity = TN / (TN + FP) if (TN + FP) > 0 else 0.0
+    precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
+    actual_fpr = FP / (FP + TN) if (FP + TN) > 0 else 0.0
+
+    return {
+        'Sensitivity': sensitivity,
+        'Specificity': specificity,
+        'Precision': precision,
+        'ActualFPR': actual_fpr,
+        'Threshold': thr_pval,
+    }
+
+
+def bootstrap_fixed_fpr_ci(
+        y_true,
+        y_pval,
+        target_fpr: float = 0.05,
+        n_bootstrap: int = 1000,
+        seed: int = 42,
+        alpha: float = 0.05,
+) -> dict:
+    """
+    Bootstrap 95 % CIs for Sensitivity, Specificity, and Precision at a
+    fixed FPR operating point (percentile method, 1 000 resamples).
+
+    At each bootstrap replicate the ROC curve is recomputed and Sensitivity
+    is interpolated at ``target_fpr``; Specificity and Precision are evaluated
+    at the nearest realised threshold.
+
+    Args:
+        y_true:      binary array-like (1 = positive / perturbed).
+        y_pval:      p-values (lower = more likely positive).
+        target_fpr:  desired false positive rate (default 0.05 = 5 %).
+        n_bootstrap: number of bootstrap resamples (default 1 000).
+        seed:        random seed for reproducibility.
+        alpha:       significance level (default 0.05).
+
+    Returns:
+        dict with point estimates and 95 % CI tuples for Sensitivity,
+        Specificity, Precision, plus 'ActualFPR' and 'Threshold'.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_pval = np.asarray(y_pval, dtype=float)
+    mask = np.isfinite(y_pval)
+    y_true, y_pval = y_true[mask], y_pval[mask]
+    n = len(y_true)
+    rng = np.random.default_rng(seed)
+
+    boot_sens = np.empty(n_bootstrap)
+    boot_spec = np.empty(n_bootstrap)
+    boot_prec = np.empty(n_bootstrap)
+
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        yt = y_true[idx]
+        yp = y_pval[idx]
+
+        if len(np.unique(yt)) < 2:
+            boot_sens[b] = boot_spec[b] = boot_prec[b] = np.nan
+            continue
+
+        try:
+            fpr_b, tpr_b, thr_b = roc_curve(yt, -yp)
+            sens = float(np.interp(target_fpr, fpr_b, tpr_b))
+            idx_t = int(np.clip(
+                np.searchsorted(fpr_b, target_fpr, side='right') - 1,
+                0, len(thr_b) - 1,
+            ))
+            thr_pval_b = float(-thr_b[idx_t])
+
+            y_pred_b = yp <= thr_pval_b
+            TP = int(((yt == 1) & y_pred_b).sum())
+            FP = int(((yt == 0) & y_pred_b).sum())
+            TN = int(((yt == 0) & ~y_pred_b).sum())
+
+            boot_sens[b] = sens
+            boot_spec[b] = TN / (TN + FP) if (TN + FP) > 0 else 0.0
+            boot_prec[b] = TP / (TP + FP) if (TP + FP) > 0 else 0.0
+        except Exception:
+            boot_sens[b] = boot_spec[b] = boot_prec[b] = np.nan
+
+    point = evaluate_at_fixed_fpr(y_true, y_pval, target_fpr)
+
+    def _ci(arr: np.ndarray):
+        v = arr[~np.isnan(arr)]
+        if len(v) == 0:
+            return (np.nan, np.nan)
+        return (
+            float(np.percentile(v, 100.0 * alpha / 2.0)),
+            float(np.percentile(v, 100.0 * (1.0 - alpha / 2.0))),
+        )
+
+    return {
+        'Sensitivity':  point['Sensitivity'],
+        'Sens_CI':      _ci(boot_sens),
+        'Specificity':  point['Specificity'],
+        'Spec_CI':      _ci(boot_spec),
+        'Precision':    point['Precision'],
+        'Prec_CI':      _ci(boot_prec),
+        'ActualFPR':    point['ActualFPR'],
+        'Threshold':    point['Threshold'],
+    }
